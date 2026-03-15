@@ -1,0 +1,24 @@
+SETUP and RUN 
+**VERY IMPORTANT**
+
+1. Download MongoDBCompass and connect with db according to backend/config/db.js
+
+2. have 4 terminals open
+
+3. terminal 1 : Connect with MongoDB. use mongod cmd
+>> net start MongoDB
+
+4. terminal 2 : direct to the ml-services and run the model with cmd
+>> pip install flask scikit-learn joblib numpy
+>> python ml_api.py
+
+5. terminal 3 : redirect to backend directory and download the npm dependencies with the following cmd
+>> npm install express cors axios bcryptjs jsonwebtoken multer mongoose sequelize tesseract.js pdf-parse
+>> npm install nodemon --save-dev
+>> npx nodemon app.js
+
+6. terminal 4 : redirect to frontend directory and download the npm dependencies with the following cmd
+>> npm install axios react-router-dom
+>> npm install -D tailwindcss postcss autoprefixer
+>> npx tailwindcss init -p
+>> npm start
