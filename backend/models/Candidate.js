@@ -8,6 +8,11 @@ age:Number,
 skills:[String],
 score:Number,
 
+certificateBonus:{
+type:Number,
+default:0
+},
+
 resumePath:String
 
 });

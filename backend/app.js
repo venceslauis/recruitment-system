@@ -6,6 +6,7 @@ require("./config/db");
 const authRoutes = require("./routes/authRoutes");
 const recruiterRoutes = require("./routes/recruiterRoutes");
 const candidateRoutes = require("./routes/candidateRoutes");
+const certificateRoutes = require("./routes/certificateRoutes");
 
 const app = express();
 
@@ -15,6 +16,7 @@ app.use(express.json());
 app.use("/api/auth",authRoutes);
 app.use("/api/recruiter",recruiterRoutes);
 app.use("/api/candidate",candidateRoutes);
+app.use("/api/certificate",certificateRoutes);
 
 app.get("/",(req,res)=>{
 res.send("API WORKING");
