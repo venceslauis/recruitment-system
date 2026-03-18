@@ -8,10 +8,14 @@ export default function RecruiterHome() {
   const [jobs, setJobs] = useState([]);
 
   useEffect(() => {
-    const recruiterId = localStorage.getItem("userId") || "demoRecruiter";
+    const recruiterId = localStorage.getItem("userId");
+    if (!recruiterId) {
+      navigate("/");
+      return;
+    }
     axios.get(`http://localhost:5000/api/recruiter/myJobs/${recruiterId}`)
       .then(res => setJobs(res.data));
-  }, []);
+  }, [navigate]);
 
   return (
     <div style={{ background: "#f8fafc", minHeight: "100vh", padding: "40px 20px" }}>

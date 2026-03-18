@@ -56,7 +56,13 @@ export default function PostJob() {
     }
 
     const skillArray = validCriteria.map(c => c.skill.trim().toLowerCase());
-    const recruiterId = localStorage.getItem("userId") || "demoRecruiter";
+    const recruiterId = localStorage.getItem("userId");
+    
+    if (!recruiterId) {
+      alert("Error: You must be logged in to post a job.");
+      navigate("/");
+      return;
+    }
 
     await axios.post("http://localhost:5000/api/recruiter/postJob", {
       title, company, description,
