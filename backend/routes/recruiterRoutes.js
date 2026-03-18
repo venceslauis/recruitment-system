@@ -19,7 +19,7 @@ router.post("/postJob", async (req, res) => {
       description,
       skills,
       skillCriteria,       // [{ skill: "react", weight: 30 }, { skill: "node", weight: 25 }, ...]
-      recruiterId: recruiterId || "demoRecruiter"
+      recruiterId
     });
 
     await job.save();
