@@ -1,0 +1,224 @@
+### Project
+
+
+
+#### overview
+
+
+
+This is a full-stack + AI/ML + Blockchain project with some key functionality of securing
+
+User data. It is a privacy preserving recruiting site which enables recruiter to find and
+
+scrutinize job applicants without revealing their sensitive details such as their Address,
+
+location, Academic marks, Backlogs, Gender etc...
+
+
+
+###### tech usecase
+
+
+
+* SBERT - for sematic candidate matching
+* Blockchain - for tamper proof certificate authenticity
+* ZKP - for eligibility check.
+
+
+
+for now, leave the blockchain and ZKP Part. We'll add that later.. but don't get confused in the workflow
+
+since blockchain and ZKP will be used later.. you just leave space for it and proceed with implementation. Finally it can be added.
+
+
+
+### Workflow
+
+
+
+##### Module 1
+
+
+
+A full stack site is developed using **MERN stack.**
+
+A user must register himself before accessing the website.
+
+Either registration must be made as an **Applicant or Recruiter** 
+
+**Registration is made using e-mail ID and Password.**
+
+
+
+An OTP is sent to the e-mail given and if the entered OTP in the portal is correct. Then, Email is verified and Password is set by the user for registration.
+
+Everytime the user (applicant/recruiter) can log in using their e-mail and password.
+
+
+
+The entered e-mail and password is stored in a DB where only authorized user can access the site after logging in.
+
+
+
+##### Module 2 
+
+
+
+###### Recruiter:
+
+When recruiter logs in he can see a dashboard where he can 
+
+1\. post a job and 
+
+2\. view Applicants.
+
+
+
+**Post a Job:**
+
+
+
+	A form which asks for the following:
+
+1\)	Job Title (i/p 50 words max.)
+
+2\)	Job description. (i/p given by recruiter 500 words max)
+
+3\)	Eligibility criteria  Goes to ZKP circuit
+
+4\)	Skills required. – Recruiter can add skill keywords like “Python”, “Backend”, any keyword… And it’s corresponding weightage is given by the recruiter.
+
+5\)	Asks for Integrity check. If the suggested box is ticked. Then additional questions like personal and carrer related questions are asked. 
+
+
+
+Eg; “Why are you interested in this job?”, “Are you willing to work in nightshift?” etc.. 
+
+A 20% from the total weightage is added by the recruiter if he also wants this. 
+
+
+
+Step 4 \& 5  Goes to Backend for computation
+
+
+
+**View Applicants:**
+
+After recruiter post the job. The view Applicants can be viewed correspondingly to the posted job in the recruiter dashboard.
+
+Only the 
+
+**1. Candidate Name** 
+
+**2. E-mail or phone** 
+
+**3. Sematic score is visible to the recruiter**
+
+It is ranked in Descending order with respect to their scores. 
+
+for eg; If candidate ‘A’ has a score of 80 and candidate ‘B’ has a score of 85, Then in the recruiter’s database ‘B’ comes first then followed by ‘A’. In ascending order.
+
+
+
+\--instruction--
+
+
+
+Eligibility criteria must include basic eligibility input forms such as;
+
+\-- years of experience
+
+\-- CGPA
+
+\-- Degree
+
+\-- location
+
+\-- Income
+
+\-- Gender
+
+\-- Backlogs
+
+\-- Year of Passing 
+
+\-- Age etc...... 
+
+Recruiter can define what are the eligibility criteria.
+
+
+
+All weightage is given by the recruiter. that incl. weightage for
+
+1. Each individual skillset and its weightage
+2. Integrity
+3. certificate
+
+
+
+All weightage added/summed up must be equal to 100 or 1. (eg; 50+30+20 = 100 or .5+.3+.2=1.0)
+
+Recruiter can split weightage among all but it should be equal to 100 not greater or lesser.
+
+
+
+In this integrity part design the system in such a way that if recruiter checks/ticks the box,
+
+Additional questions can be entered by the recruiter and these questions are attached to candidate form to answer them.
+
+
+
+##### Module 3
+
+
+
+**Candidate:**
+
+If a candidate/applicant logins, he can see a dashboard where jobs posted by the recruiters can be seen. Also a search bar is given to search for specific Job. (keyword matching with job title)
+
+If a candidate clicks on a job and applies he should fill the details in the form.. The form asks for Name, email, Phone. Then the basic eligible details given by the recruiter.
+
+For skills and Internships - The entire paragraphs given in the resume is extracted from the OCR tool using tesseract OCR and the extracted text can be edited in the form before submission. 
+
+Additionally, Certificates can be attached. 
+
+And then Integrity questions are asked if recruiter adds it while posting with special weightage. 
+
+
+
+**Working :**
+
+1\.	Name, E-mail and Phone is not disturbed. 
+
+2\.	Eligibility criteria is connected with ZKP. The candidate can enter the details in the input. If a single eligibility criteria is not satisfied. Then, Simply the candidate details are not stored in the recruiter’s dashboard. The candidate is denied. 
+
+3\.	The skills and other details extracted from the resume is sent to the SBERT to check for sematic similarity to the recruiter specified skillset and similarity score generated by SBERT is multiplied with weightage assigned by the recruiter is used for score computation and calculation.  
+
+4\.	The Answers for Integrity Questions also goes into the SBERT to check the candidates sincere mindset. 
+
+5\.	The certificates uploaded by candidate is checked with the blockchain private ledger whether it is there or not. If the hash of the certificate matches with that of a certificate in the ledger then The certificate is verified. It also adds up to a weightage for score computation. This is done using SHA 256 algorithm. (later work)
+
+The above working flow happens when candidate submits the form. A candidate can apply for each job only once.  
+
+
+
+SBERT only gives similarity score. This similarity score is multiplied with the weightage assigned and summed up in the end to give a final score.
+
+YOU build the scoring system logic
+
+**Final Score = (Skill Similarity × Skill Weight) + (Integrity Score × Integrity Weight)**
+
+**+ (Certificate Bonus)**
+
+Final Score computation is done in the system backend. After having the computed similarity scores. 
+
+
+
+
+
+
+
+
+
+
+

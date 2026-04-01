@@ -12,8 +12,9 @@ const ApplicationSchema = new mongoose.Schema({
     ref: "Candidate"
   },
 
-  // Candidate details (submitted at application time, kept private from recruiters)
   name: String,
+  email: String,
+  phone: String,
   age: Number,
 
   // Skills extracted from uploaded resume
@@ -22,8 +23,15 @@ const ApplicationSchema = new mongoose.Schema({
   // Path to the uploaded resume file
   resumePath: String,
 
-  // Weighted match score calculated against job's skill criteria (visible only to recruiter as anonymous rank)
+  // Weighted match score calculated against job's skill criteria
   matchScore: { type: Number, default: 0 },
+
+  // Score breakdown
+  scoreDetails: {
+    skillScore: { type: Number, default: 0 },
+    integrityScore: { type: Number, default: 0 },
+    certificateBonus: { type: Number, default: 0 }
+  },
 
   // ZKP proof hash for the score verification
   zkpProofHash: String,

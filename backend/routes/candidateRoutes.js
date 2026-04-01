@@ -1,122 +1,13 @@
 const express = require("express");
 const router = express.Router();
-
 const multer = require("multer");
-const pdfParse = require("pdf-parse");
+const tesseract = require("tesseract.js");
+const axios = require("axios");
 const fs = require("fs");
 const crypto = require("crypto");
 const Job = require("../models/Job");
 const Application = require("../models/Application");
 const Candidate = require("../models/Candidate");
-
-/* =========================
-   SKILL DATABASE
-========================= */
-
-const skillsDB = [
-  "python",
-  "java",
-  "c++",
-  "javascript",
-  "react",
-  "node",
-  "express",
-  "mongodb",
-  "mysql",
-  "machine learning",
-  "deep learning",
-  "tensorflow",
-  "pytorch",
-  "data analysis",
-  "sql",
-  "html",
-  "css",
-  "aws",
-  "docker",
-  "kubernetes",
-  "typescript",
-  "angular",
-  "vue",
-  "django",
-  "flask",
-  "git",
-  "linux",
-  "agile",
-  "scrum",
-  "rest api",
-  "graphql",
-  "redis",
-  "postgresql",
-  "figma",
-  "tailwind"
-];
-
-/* =========================
-   SKILL EXTRACTION
-========================= */
-
-function extractSkills(text) {
-  const lowerText = text.toLowerCase();
-  const detected = [];
-
-  skillsDB.forEach(skill => {
-    if (lowerText.includes(skill)) {
-      detected.push(skill);
-    }
-  });
-
-  return detected;
-}
-
-/* =========================
-   ZKP-BASED WEIGHTED MATCH SCORE
-   Calculates score using the job's
-   skill criteria weightage
-========================= */
-
-function calculateWeightedMatchScore(candidateSkills, skillCriteria) {
-  if (!skillCriteria || skillCriteria.length === 0) {
-    // Fallback: simple percentage of matched skills
-    return 0;
-  }
-
-  let totalScore = 0;
-
-  skillCriteria.forEach(criteria => {
-    const candidateHasSkill = candidateSkills.some(
-      s => s.toLowerCase() === criteria.skill.toLowerCase()
-    );
-
-    if (candidateHasSkill) {
-      totalScore += criteria.weight;
-    }
-  });
-
-  // Score is out of 100 (since weights should sum to 100)
-  return Math.min(Math.round(totalScore), 100);
-}
-
-/* =========================
-   GENERATE ZKP PROOF HASH
-   Creates a hash proof that the score
-   was computed correctly without
-   revealing raw candidate data
-========================= */
-
-function generateZkpProofHash(candidateSkills, skillCriteria, matchScore) {
-  const proofData = JSON.stringify({
-    skillCount: candidateSkills.length,
-    criteriaCount: skillCriteria.length,
-    matchScore,
-    timestamp: Date.now()
-  });
-
-  return crypto.createHash("sha256").update(proofData).digest("hex");
-}
-
-/* =========================
-   MULTER CONFIG
-========================= */
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -129,13 +20,9 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-/* =========================
-   GET ALL JOBS
-========================= */
-
 router.get("/jobs", async (req, res) => {
   try {
-    const jobs = await Job.find();
+    const jobs = await Job.find().sort({ createdAt: -1 });
     res.json(jobs);
   } catch (err) {
     console.log(err);
@@ -143,153 +30,169 @@ router.get("/jobs", async (req, res) => {
   }
 });
 
-/* =========================
-   APPLY FOR JOB
-   Candidate submits: resume file + name + age
-   System: extracts skills, calculates weighted
-   match score using ZKP circuit, stores application
-========================= */
-
 router.post(
   "/apply",
-  upload.single("resume"),
+  upload.fields([{ name: "resume", maxCount: 1 }, { name: "certificate", maxCount: 1 }]),
   async (req, res) => {
-
     try {
-
-      const { jobId, candidateId, name, age } = req.body;
+      const { 
+        jobId, candidateId, name, email, phone, age, 
+        experience, cgpa, degree, location, gender, 
+        integrityAnswers 
+      } = req.body;
 
       if (!jobId) {
         return res.status(400).json({ message: "jobId is required" });
       }
 
-      // Check for duplicate application
-      const existingApp = await Application.findOne({ jobId, candidateId });
+      const existingApp = await Application.findOne({ jobId, email });
       if (existingApp) {
         return res.status(400).json({ message: "You have already applied for this job" });
       }
 
-      // Fetch the job to get skill criteria
       const job = await Job.findById(jobId);
       if (!job) {
         return res.status(404).json({ message: "Job not found" });
       }
 
-      let resumeSkills = [];
-      let resumePath = "";
-
-      // Parse resume if file uploaded
-      if (req.file) {
-        const dataBuffer = fs.readFileSync(req.file.path);
-        const pdfData = await pdfParse(dataBuffer);
-        const text = pdfData.text;
-        resumeSkills = extractSkills(text);
-        resumePath = req.file.path;
+      // ELIGIBILITY CHECK (ZKP Validation mock)
+      if (job.eligibility) {
+        let isEligible = true;
+        if (job.eligibility.experience && Number(experience) < job.eligibility.experience) isEligible = false;
+        if (job.eligibility.cgpa && Number(cgpa) < job.eligibility.cgpa) isEligible = false;
+        if (job.eligibility.age && Number(age) > job.eligibility.age) isEligible = false;
+        if (job.eligibility.degree && degree?.toLowerCase() !== job.eligibility.degree.toLowerCase()) isEligible = false;
+        if (job.eligibility.location && location?.toLowerCase() !== job.eligibility.location.toLowerCase()) isEligible = false;
+        if (job.eligibility.gender && job.eligibility.gender !== 'Any' && gender?.toLowerCase() !== job.eligibility.gender.toLowerCase()) isEligible = false;
+        
+        if (!isEligible) {
+          return res.status(400).json({ message: "You do not meet the eligibility criteria for this job." });
+        }
       }
 
-      // Calculate weighted match score using job's skill criteria (ZKP circuit)
-      const matchScore = calculateWeightedMatchScore(resumeSkills, job.skillCriteria);
+      let resumeText = "";
+      let resumePath = "";
+      
+      const resumeFile = req.files['resume'] ? req.files['resume'][0] : null;
+      if (resumeFile) {
+        resumePath = resumeFile.path;
+        try {
+          const { data: { text } } = await tesseract.recognize(resumePath, 'eng');
+          resumeText = text;
+        } catch(ocrErr) {
+          console.error("OCR Error:", ocrErr);
+          resumeText = req.body.resumeTextFallback || ""; // fallback if OCR fails
+        }
+      }
+
+      // SBERT SCORING
+      let skillScore = 0;
+      let integrityScore = 0;
+      let certificateBonus = 0;
+
+      // 1. Skill Similarity
+      const recruiterSkillsText = job.skillCriteria ? job.skillCriteria.map(sc => sc.skill).join(", ") : "";
+      if (recruiterSkillsText && resumeText) {
+         try {
+           const sbertRes = await axios.post("http://127.0.0.1:5000/match", {
+             resumeText: resumeText,
+             jobDescription: recruiterSkillsText
+           });
+           // Normalized SBERT score (0 to 100)
+           const sim = Math.max(0, sbertRes.data.score); 
+           // Weighted skill score
+           const totalSkillWeight = job.skillCriteria.reduce((sum, s) => sum + s.weight, 0);
+           skillScore = (sim / 100) * totalSkillWeight;
+         } catch(e) {
+           console.error("SBERT Error:", e.message);
+         }
+      }
+
+      // 2. Integrity Questions Similarity
+      if (job.integrityCheck && job.integrityCheck.enabled && integrityAnswers) {
+         const questionsText = job.integrityCheck.questions.join(" ");
+         try {
+           const sbertRes = await axios.post("http://127.0.0.1:5000/match", {
+             resumeText: integrityAnswers,
+             jobDescription: questionsText
+           });
+           const sim = Math.max(0, sbertRes.data.score);
+           integrityScore = (sim / 100) * job.integrityCheck.weight;
+         } catch(e) {
+           console.error("SBERT Integrity Error:", e.message);
+         }
+      }
+
+      // 3. Certificate Bonus
+      const certificateFile = req.files['certificate'] ? req.files['certificate'][0] : null;
+      if (certificateFile) {
+         certificateBonus = 10; // fixed 10 points bonus per instruction
+      }
+
+      const matchScore = skillScore + integrityScore + certificateBonus;
 
       // Generate ZKP proof hash
-      const zkpProofHash = generateZkpProofHash(resumeSkills, job.skillCriteria, matchScore);
+      const proofData = JSON.stringify({ email, jobId, matchScore, timestamp: Date.now() });
+      const zkpProofHash = crypto.createHash("sha256").update(proofData).digest("hex");
 
-      // Create application with all data
       const application = new Application({
         jobId,
         candidateId: candidateId && candidateId !== "null" ? candidateId : undefined,
         name,
+        email,
+        phone,
         age: age ? parseInt(age) : undefined,
-        resumeSkills,
         resumePath,
         matchScore,
+        scoreDetails: { skillScore, integrityScore, certificateBonus },
         zkpProofHash
       });
 
       await application.save();
 
-      // Response to candidate — does NOT include score or ranking
       res.json({
         message: "Application submitted successfully",
-        applicationId: application._id,
-        extractedSkills: resumeSkills
+        applicationId: application._id
       });
 
     } catch (err) {
       console.error("APPLICATION ERROR:", err);
       res.status(500).json({ message: "Application failed" });
     }
-
   }
 );
 
-/* =========================
-   GET MY APPLICATIONS
-   Privacy: returns job details + status
-   Does NOT return score/ranking to candidate
-========================= */
-
-router.get("/myApplications/:candidateId", async (req, res) => {
-
+router.get("/myApplications/:email", async (req, res) => {
   try {
-
-    const candidateId = req.params.candidateId;
-
-    if (!candidateId || candidateId === "null") {
-      return res.status(400).json({ message: "Invalid candidateId" });
+    const email = req.params.email;
+    if (!email || email === "null") {
+      return res.status(400).json({ message: "Invalid email" });
     }
 
-    const apps = await Application.find({ candidateId })
-      .populate("jobId");
-
-    // Strip out score/ranking data — candidate should NOT see these
+    const apps = await Application.find({ email }).populate("jobId");
     const sanitized = apps.map(app => ({
       _id: app._id,
       jobId: app.jobId,
       appliedAt: app.appliedAt,
-      resumeSkills: app.resumeSkills
-      // matchScore, rank, zkpProofHash are deliberately EXCLUDED
     }));
-
     res.json(sanitized);
 
   } catch (err) {
-
     console.log("APPLICATION FETCH ERROR:", err);
     res.status(500).json({ message: "Failed to fetch applications" });
-
   }
-
 });
-
-/* =========================
-   CANCEL APPLICATION
-========================= */
 
 router.delete("/application/:id", async (req, res) => {
   try {
-    const applicationId = req.params.id;
-    if (!applicationId) {
-      return res.status(400).json({ message: "Invalid applicationId" });
-    }
+    const application = await Application.findByIdAndDelete(req.params.id);
+    if (!application) return res.status(404).json({ message: "Application not found" });
 
-    const application = await Application.findByIdAndDelete(applicationId);
-
-    if (!application) {
-      return res.status(404).json({ message: "Application not found" });
-    }
-
-    // Clean up resume file if exists
     if (application.resumePath) {
-      try {
-        fs.unlinkSync(application.resumePath);
-      } catch (e) {
-        // File may already be deleted
-      }
+      try { fs.unlinkSync(application.resumePath); } catch (e) {}
     }
-
     res.json({ message: "Application cancelled successfully" });
   } catch (err) {
-    console.log("APPLICATION CANCEL ERROR:", err);
     res.status(500).json({ message: "Failed to cancel application" });
   }
 });

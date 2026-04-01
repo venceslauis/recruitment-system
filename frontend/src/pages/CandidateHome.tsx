@@ -1,602 +1,214 @@
-import { useEffect, useState } from "react";
-import axios from "axios";
+import React, { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import API from "../services/api";
 
-export default function CandidateHome() {
-
+const CandidateHome: React.FC = () => {
   const [jobs, setJobs] = useState<any[]>([]);
-  const [appliedJobIds, setAppliedJobIds] = useState<Set<string>>(new Set());
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
 
-  // Application modal state
-  const [applyingJob, setApplyingJob] = useState<any | null>(null);
-  const [applyName, setApplyName] = useState("");
-  const [applyAge, setApplyAge] = useState("");
-  const [applyFile, setApplyFile] = useState<File | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitResult, setSubmitResult] = useState<{ skills: string[] } | null>(null);
-
-  const candidateId = localStorage.getItem("candidateId");
-  const validCandidateId = candidateId && candidateId !== "null" ? candidateId : null;
+  // New applied states for apply modal
+  const [selectedJob, setSelectedJob] = useState<any>(null);
+  const [applyForm, setApplyForm] = useState({
+    name: "", email: "", phone: "", age: "", experience: "", cgpa: "", degree: "", location: "", gender: "Any", integrityAnswers: ""
+  });
+  const [resume, setResume] = useState<File | null>(null);
+  const [certificate, setCertificate] = useState<File | null>(null);
+  const [applyLoading, setApplyLoading] = useState(false);
+  const [applyErr, setApplyErr] = useState("");
+  const [applySuccess, setApplySuccess] = useState("");
 
   useEffect(() => {
-    axios
-      .get("http://localhost:5000/api/candidate/jobs")
-      .then(res => setJobs(res.data));
-
-    if (validCandidateId) {
-      axios
-        .get(`http://localhost:5000/api/candidate/myApplications/${validCandidateId}`)
-        .then(res => {
-          const ids = new Set<string>(res.data.map((a: any) => a.jobId?._id ?? a.jobId));
-          setAppliedJobIds(ids);
-        });
-    }
+    const fetchJobs = async () => {
+      try {
+        const { data } = await API.get("/candidate/jobs");
+        setJobs(data);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchJobs();
   }, []);
 
-  const openApplyModal = (job: any) => {
-    setApplyingJob(job);
-    setApplyName("");
-    setApplyAge("");
-    setApplyFile(null);
-    setSubmitResult(null);
-  };
+  const handleApply = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setApplyLoading(true); setApplyErr(""); setApplySuccess("");
+    
+    const formData = new FormData();
+    formData.append("jobId", selectedJob._id);
+    formData.append("candidateId", localStorage.getItem("candidateId") || "");
+    Object.entries(applyForm).forEach(([k, v]) => formData.append(k, v));
+    if (resume) formData.append("resume", resume);
+    if (certificate) formData.append("certificate", certificate);
 
-  const closeApplyModal = () => {
-    setApplyingJob(null);
-    setApplyName("");
-    setApplyAge("");
-    setApplyFile(null);
-    setSubmitResult(null);
-  };
-
-  async function submitApplication() {
-    if (!applyingJob) return;
-    if (!applyName.trim()) {
-      alert("Please enter your name.");
-      return;
-    }
-    if (!applyAge.trim()) {
-      alert("Please enter your age.");
-      return;
-    }
-    if (!applyFile) {
-      alert("Please upload your resume (PDF).");
-      return;
-    }
-
-    setSubmitting(true);
     try {
-      const formData = new FormData();
-      formData.append("resume", applyFile);
-      formData.append("jobId", applyingJob._id);
-      formData.append("name", applyName);
-      formData.append("age", applyAge);
-      if (validCandidateId) {
-        formData.append("candidateId", validCandidateId);
-      }
-
-      const res = await axios.post("http://localhost:5000/api/candidate/apply", formData, {
+      const { data } = await API.post("/candidate/apply", formData, {
         headers: { "Content-Type": "multipart/form-data" }
       });
-
-      setAppliedJobIds(prev => new Set(prev).add(applyingJob._id));
-      setSubmitResult({ skills: res.data.extractedSkills || [] });
-
-    } catch (err: any) {
-      const message = err?.response?.data?.message || "Failed to apply. Please try again.";
-      alert(message);
+      setApplySuccess(data.message);
+      setTimeout(() => {
+        setSelectedJob(null);
+        setApplySuccess("");
+      }, 2000);
+    } catch(err: any) {
+      setApplyErr(err.response?.data?.message || "Application Failed");
     } finally {
-      setSubmitting(false);
+      setApplyLoading(false);
     }
-  }
-
-  const inputStyle: React.CSSProperties = {
-    width: "100%",
-    background: "#f8fafc",
-    border: "1px solid #cbd5e1",
-    borderRadius: 12,
-    padding: "14px 18px",
-    color: "#0f172a",
-    fontSize: "1rem",
-    outline: "none",
-    transition: "all 0.2s",
-    boxSizing: "border-box"
   };
 
+  const filteredJobs = jobs.filter(j => j.title.toLowerCase().includes(search.toLowerCase()) || j.description.toLowerCase().includes(search.toLowerCase()));
+
   return (
-    <div style={{ background: "#f8fafc", minHeight: "100vh", padding: "40px 20px" }}>
-      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-
-        {/* Header */}
-        <div style={{ marginBottom: 36 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 8 }}>
-            <div style={{
-              width: 44, height: 44, borderRadius: 12,
-              background: "linear-gradient(135deg, #4f46e5, #3b82f6)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 20, boxShadow: "0 4px 6px -1px rgba(59, 130, 246, 0.2)"
-            }}>💼</div>
-            <h2 style={{ color: "#0f172a", fontSize: "1.8rem", fontWeight: 800, margin: 0, letterSpacing: "-0.02em" }}>
-              Available Jobs
-            </h2>
-          </div>
-          <p style={{ color: "#64748b", margin: 0, paddingLeft: 58, fontSize: "1rem" }}>
-            {jobs.length} position{jobs.length !== 1 ? "s" : ""} open
-          </p>
+    <div className="min-h-screen p-8 mt-16 max-w-7xl mx-auto text-white">
+      <div className="flex flex-col md:flex-row justify-between md:items-center mb-10 gap-6">
+        <div>
+          <h1 className="text-4xl font-extrabold text-glow mb-2">Available Opportunities</h1>
+          <p className="text-gray-300">Find the role that matches your skills perfectly.</p>
         </div>
-
-        {/* Job cards grid */}
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
-          gap: 24
-        }}>
-          {jobs.map((job: any) => {
-            const alreadyApplied = appliedJobIds.has(job._id);
-
-            return (
-              <div key={job._id} style={{
-                background: "#ffffff",
-                borderRadius: 20,
-                padding: 32,
-                border: alreadyApplied ? "2px solid #22c55e" : "1px solid #e2e8f0",
-                boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.04), 0 4px 6px -2px rgba(0, 0, 0, 0.02)",
-                transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
-                display: "flex",
-                flexDirection: "column",
-                gap: 14
-              }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.transform = "translateY(-6px)";
-                  e.currentTarget.style.boxShadow = "0 20px 25px -5px rgba(0, 0, 0, 0.08), 0 10px 10px -5px rgba(0, 0, 0, 0.04)";
-                  if (!alreadyApplied) e.currentTarget.style.borderColor = "#93c5fd";
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.transform = "translateY(0)";
-                  e.currentTarget.style.boxShadow = "0 10px 15px -3px rgba(0, 0, 0, 0.04), 0 4px 6px -2px rgba(0, 0, 0, 0.02)";
-                  if (!alreadyApplied) e.currentTarget.style.borderColor = "#e2e8f0";
-                }}
-              >
-                {/* Applied badge */}
-                {alreadyApplied && (
-                  <div style={{
-                    alignSelf: "flex-start",
-                    background: "#dcfce7",
-                    color: "#16a34a",
-                    fontSize: "0.75rem",
-                    fontWeight: 700,
-                    padding: "4px 14px",
-                    borderRadius: 999,
-                    letterSpacing: "0.05em",
-                  }}>
-                    ✓ APPLIED
-                  </div>
-                )}
-
-                {/* Title */}
-                <h3 style={{
-                  fontSize: "1.3rem",
-                  fontWeight: 800,
-                  color: "#0f172a",
-                  margin: 0,
-                  lineHeight: 1.3,
-                  letterSpacing: "-0.01em"
-                }}>
-                  {job.title}
-                </h3>
-
-                {/* Company */}
-                {job.company && (
-                   <p style={{ color: "#475569", margin: "0 0 4px 0", fontSize: "0.95rem", fontWeight: 500 }}>
-                     🏢 {job.company}
-                   </p>
-                )}
-
-                {/* Description */}
-                {job.description && (
-                  <p style={{
-                    color: "#64748b",
-                    fontSize: "0.95rem",
-                    lineHeight: 1.6,
-                    margin: 0,
-                    display: "-webkit-box",
-                    WebkitLineClamp: 3,
-                    WebkitBoxOrient: "vertical",
-                    overflow: "hidden"
-                  }}>
-                    {job.description}
-                  </p>
-                )}
-
-                {/* Skills */}
-                {job.skills?.length > 0 && (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
-                    {job.skills.map((skill: string, i: number) => (
-                      <span key={i} style={{
-                        background: "#f1f5f9",
-                        color: "#475569",
-                        fontSize: "0.8rem",
-                        fontWeight: 600,
-                        padding: "4px 12px",
-                        borderRadius: 8,
-                        border: "1px solid #e2e8f0"
-                      }}>
-                        {skill}
-                      </span>
-                    ))}
-                  </div>
-                )}
-
-                {/* Skill Weightage info */}
-                {job.skillCriteria?.length > 0 && (
-                  <div style={{
-                    background: "#faf5ff",
-                    border: "1px solid #e9d5ff",
-                    borderRadius: 12,
-                    padding: "12px 16px",
-                    marginTop: 4
-                  }}>
-                    <p style={{ color: "#7c3aed", fontSize: "0.8rem", fontWeight: 700, margin: "0 0 8px 0" }}>
-                      🔐 ZKP Scoring Criteria
-                    </p>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {job.skillCriteria.map((c: any, i: number) => (
-                        <span key={i} style={{
-                          background: "#ede9fe",
-                          color: "#6d28d9",
-                          fontSize: "0.75rem",
-                          fontWeight: 600,
-                          padding: "3px 10px",
-                          borderRadius: 6
-                        }}>
-                          {c.skill}: {c.weight}%
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Apply button */}
-                <div style={{ marginTop: "auto", paddingTop: 16 }}>
-                  {alreadyApplied ? (
-                    <div style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 8,
-                      color: "#16a34a",
-                      background: "#f0fdf4",
-                      padding: "12px",
-                      borderRadius: 12,
-                      fontWeight: 700,
-                      fontSize: "0.95rem",
-                      border: "1px solid #bbf7d0"
-                    }}>
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="20 6 9 17 4 12" />
-                      </svg>
-                      Application Submitted
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => openApplyModal(job)}
-                      style={{
-                        background: "linear-gradient(135deg, #4f46e5, #3b82f6)",
-                        color: "#fff",
-                        border: "none",
-                        borderRadius: 12,
-                        padding: "14px 24px",
-                        fontWeight: 700,
-                        fontSize: "0.95rem",
-                        cursor: "pointer",
-                        transition: "transform 0.2s, box-shadow 0.2s",
-                        width: "100%",
-                        boxShadow: "0 4px 6px -1px rgba(79, 70, 229, 0.2)"
-                      }}
-                      onMouseEnter={e => {
-                        e.currentTarget.style.transform = "translateY(-2px)";
-                        e.currentTarget.style.boxShadow = "0 10px 15px -3px rgba(79, 70, 229, 0.3)";
-                      }}
-                      onMouseLeave={e => {
-                        e.currentTarget.style.transform = "translateY(0)";
-                        e.currentTarget.style.boxShadow = "0 4px 6px -1px rgba(79, 70, 229, 0.2)";
-                      }}
-                    >
-                      Apply Now
-                    </button>
-                  )}
-                </div>
-
-              </div>
-            );
-          })}
+        <div className="flex gap-4 items-center">
+           <input 
+             type="text" placeholder="Search jobs by keyword..." 
+             value={search} onChange={e => setSearch(e.target.value)}
+             className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 w-80 focus:outline-none focus:ring-2 focus:ring-teal-400"
+           />
+           <Link to="/my-applications" className="px-6 py-3 rounded-xl font-bold bg-white/10 hover:bg-white/20 transition backdrop-blur-md border border-white/10">
+             My Applications
+           </Link>
         </div>
-
       </div>
 
-      {/* ========================= */}
-      {/* APPLICATION MODAL         */}
-      {/* ========================= */}
-      {applyingJob && (
-        <div style={{
-          position: "fixed",
-          inset: 0,
-          background: "rgba(0,0,0,0.5)",
-          backdropFilter: "blur(4px)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          zIndex: 100,
-          padding: 20
-        }}>
-          <div style={{
-            background: "#ffffff",
-            borderRadius: 24,
-            padding: "40px 36px",
-            maxWidth: 520,
-            width: "100%",
-            maxHeight: "90vh",
-            overflow: "auto",
-            boxShadow: "0 25px 50px -12px rgba(0, 0, 0, 0.25)",
-            animation: "fadeIn 0.2s ease-out"
-          }}>
-
-            {!submitResult ? (
-              <>
-                {/* Modal header */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 }}>
-                  <div>
-                    <h3 style={{ color: "#0f172a", fontSize: "1.4rem", fontWeight: 800, margin: "0 0 6px 0", letterSpacing: "-0.01em" }}>
-                      Apply for Position
-                    </h3>
-                    <p style={{ color: "#64748b", margin: 0, fontSize: "0.95rem" }}>
-                      {applyingJob.title} at {applyingJob.company || "Company"}
-                    </p>
-                  </div>
-                  <button
-                    onClick={closeApplyModal}
-                    style={{
-                      background: "#f1f5f9",
-                      border: "none",
-                      borderRadius: 10,
-                      width: 36, height: 36,
-                      fontSize: "1.2rem",
-                      cursor: "pointer",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      color: "#64748b",
-                      transition: "all 0.2s"
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = "#e2e8f0"; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = "#f1f5f9"; }}
-                  >
-                    ✕
-                  </button>
+      {loading ? (
+        <div className="flex justify-center items-center py-20">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredJobs.map(job => (
+            <div key={job._id} className="glass p-6 rounded-3xl flex flex-col justify-between hover:-translate-y-2 transition-transform duration-300">
+              <div>
+                <h3 className="text-2xl font-bold mb-1">{job.title}</h3>
+                <p className="text-teal-300 font-semibold mb-3">{job.company}</p>
+                <p className="text-gray-300 text-sm line-clamp-3 mb-4">{job.description}</p>
+                
+                <div className="flex flex-wrap gap-2 mb-6">
+                  {job.skillCriteria?.slice(0, 4).map((s: any, i: number) => (
+                    <span key={i} className="text-xs bg-white/10 px-2 py-1 rounded-md border border-white/5">{s.skill}</span>
+                  ))}
+                  {job.skillCriteria?.length > 4 && <span className="text-xs px-2 py-1">+{job.skillCriteria.length - 4} more</span>}
                 </div>
-
-                {/* ZKP info banner */}
-                <div style={{
-                  background: "#faf5ff",
-                  border: "1px solid #e9d5ff",
-                  borderRadius: 14,
-                  padding: "16px 20px",
-                  marginBottom: 24
-                }}>
-                  <p style={{ color: "#7c3aed", fontSize: "0.85rem", fontWeight: 600, margin: 0, lineHeight: 1.5 }}>
-                    🔐 Your resume skills will be matched against job criteria using ZKP circuits.
-                    Your personal details (name, age) remain private and are never visible to recruiters.
-                  </p>
-                </div>
-
-                <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-
-                  {/* Name */}
-                  <div>
-                    <label style={{ color: "#334155", fontSize: "0.9rem", fontWeight: 700, marginBottom: 8, display: "block" }}>
-                      Full Name
-                    </label>
-                    <input
-                      style={inputStyle}
-                      placeholder="Enter your full name"
-                      value={applyName}
-                      onFocus={e => {
-                        e.currentTarget.style.borderColor = "#4f46e5";
-                        e.currentTarget.style.background = "#ffffff";
-                        e.currentTarget.style.boxShadow = "0 0 0 3px rgba(79, 70, 229, 0.1)";
-                      }}
-                      onBlur={e => {
-                        e.currentTarget.style.borderColor = "#cbd5e1";
-                        e.currentTarget.style.background = "#f8fafc";
-                        e.currentTarget.style.boxShadow = "none";
-                      }}
-                      onChange={e => setApplyName(e.target.value)}
-                    />
-                  </div>
-
-                  {/* Age */}
-                  <div>
-                    <label style={{ color: "#334155", fontSize: "0.9rem", fontWeight: 700, marginBottom: 8, display: "block" }}>
-                      Age
-                    </label>
-                    <input
-                      type="number"
-                      style={inputStyle}
-                      placeholder="Enter your age"
-                      value={applyAge}
-                      onFocus={e => {
-                        e.currentTarget.style.borderColor = "#4f46e5";
-                        e.currentTarget.style.background = "#ffffff";
-                        e.currentTarget.style.boxShadow = "0 0 0 3px rgba(79, 70, 229, 0.1)";
-                      }}
-                      onBlur={e => {
-                        e.currentTarget.style.borderColor = "#cbd5e1";
-                        e.currentTarget.style.background = "#f8fafc";
-                        e.currentTarget.style.boxShadow = "none";
-                      }}
-                      onChange={e => setApplyAge(e.target.value)}
-                    />
-                  </div>
-
-                  {/* Resume upload */}
-                  <div>
-                    <label style={{ color: "#334155", fontSize: "0.9rem", fontWeight: 700, marginBottom: 8, display: "block" }}>
-                      📄 Upload Resume (PDF)
-                    </label>
-                    <div style={{
-                      border: applyFile ? "2px solid #22c55e" : "2px dashed #cbd5e1",
-                      borderRadius: 14,
-                      padding: "24px",
-                      textAlign: "center",
-                      background: applyFile ? "#f0fdf4" : "#f8fafc",
-                      cursor: "pointer",
-                      transition: "all 0.2s"
-                    }}>
-                      <input
-                        type="file"
-                        accept=".pdf"
-                        onChange={e => setApplyFile(e.target.files?.[0] || null)}
-                        style={{
-                          width: "100%",
-                          cursor: "pointer"
-                        }}
-                      />
-                      {applyFile && (
-                        <p style={{ color: "#16a34a", fontWeight: 600, margin: "8px 0 0 0", fontSize: "0.85rem" }}>
-                          ✓ {applyFile.name}
-                        </p>
-                      )}
-                    </div>
-                    <p style={{ color: "#94a3b8", fontSize: "0.8rem", margin: "8px 0 0 0", fontWeight: 500 }}>
-                      Skills will be automatically extracted from your resume
-                    </p>
-                  </div>
-
-                  {/* Submit */}
-                  <button
-                    onClick={submitApplication}
-                    disabled={submitting}
-                    style={{
-                      background: submitting ? "#a5b4fc" : "linear-gradient(135deg, #4f46e5, #3b82f6)",
-                      color: "#fff",
-                      border: "none",
-                      borderRadius: 12,
-                      padding: "16px",
-                      fontWeight: 700,
-                      fontSize: "1rem",
-                      cursor: submitting ? "not-allowed" : "pointer",
-                      transition: "transform 0.2s, box-shadow 0.2s",
-                      marginTop: 4,
-                      boxShadow: submitting ? "none" : "0 4px 6px -1px rgba(79, 70, 229, 0.2)"
-                    }}
-                    onMouseEnter={e => {
-                      if (!submitting) {
-                        e.currentTarget.style.transform = "translateY(-1px)";
-                        e.currentTarget.style.boxShadow = "0 10px 15px -3px rgba(79, 70, 229, 0.3)";
-                      }
-                    }}
-                    onMouseLeave={e => {
-                      if (!submitting) {
-                        e.currentTarget.style.transform = "translateY(0)";
-                        e.currentTarget.style.boxShadow = "0 4px 6px -1px rgba(79, 70, 229, 0.2)";
-                      }
-                    }}
-                  >
-                    {submitting ? "Submitting..." : "🚀 Submit Application"}
-                  </button>
-                </div>
-              </>
-            ) : (
-              /* Success state */
-              <div style={{ textAlign: "center" }}>
-                <div style={{
-                  width: 72, height: 72, borderRadius: 20,
-                  background: "linear-gradient(135deg, #22c55e, #16a34a)",
-                  display: "inline-flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 32, marginBottom: 20,
-                  boxShadow: "0 10px 15px -3px rgba(34, 197, 94, 0.3)"
-                }}>✓</div>
-
-                <h3 style={{ color: "#0f172a", fontSize: "1.5rem", fontWeight: 800, margin: "0 0 8px 0" }}>
-                  Application Submitted!
-                </h3>
-                <p style={{ color: "#64748b", margin: "0 0 24px 0", fontSize: "1rem" }}>
-                  Your application has been submitted securely via ZKP.
-                </p>
-
-                {submitResult.skills.length > 0 && (
-                  <div style={{
-                    background: "#f8fafc",
-                    border: "1px solid #e2e8f0",
-                    borderRadius: 14,
-                    padding: "20px",
-                    marginBottom: 24,
-                    textAlign: "left"
-                  }}>
-                    <p style={{ color: "#334155", fontSize: "0.85rem", fontWeight: 700, margin: "0 0 10px 0" }}>
-                      🛠️ Skills Extracted from Resume:
-                    </p>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                      {submitResult.skills.map((skill: string, i: number) => (
-                        <span key={i} style={{
-                          background: "#eff6ff",
-                          color: "#1d4ed8",
-                          fontSize: "0.8rem",
-                          fontWeight: 600,
-                          padding: "4px 12px",
-                          borderRadius: 8,
-                          border: "1px solid #bfdbfe"
-                        }}>
-                          {skill}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div style={{
-                  background: "#faf5ff",
-                  border: "1px solid #e9d5ff",
-                  borderRadius: 12,
-                  padding: "14px 18px",
-                  marginBottom: 24
-                }}>
-                  <p style={{ color: "#7c3aed", fontSize: "0.85rem", fontWeight: 600, margin: 0 }}>
-                    🔐 Your score has been computed using ZKP circuits and is only visible to the recruiter as an anonymous ranking.
-                  </p>
-                </div>
-
-                <button
-                  onClick={closeApplyModal}
-                  style={{
-                    background: "linear-gradient(135deg, #10b981, #059669)",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: 12,
-                    padding: "14px 32px",
-                    fontWeight: 700,
-                    fontSize: "1rem",
-                    cursor: "pointer",
-                    transition: "transform 0.2s",
-                    boxShadow: "0 4px 6px -1px rgba(16, 185, 129, 0.2)"
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.transform = "translateY(-1px)"}
-                  onMouseLeave={e => e.currentTarget.style.transform = "translateY(0)"}
-                >
-                  Done
-                </button>
               </div>
-            )}
-
-          </div>
+              <button 
+                onClick={() => setSelectedJob(job)} 
+                className="w-full py-3 rounded-xl font-bold bg-gradient-to-r from-teal-400 to-indigo-500 hover:opacity-90 transition-opacity"
+              >
+                Apply Now
+              </button>
+            </div>
+          ))}
+          {filteredJobs.length === 0 && (
+             <div className="col-span-full text-center py-20 text-gray-400 glass rounded-3xl">No jobs found matching your search.</div>
+          )}
         </div>
       )}
 
-      {/* Modal animation */}
-      <style>{`
-        @keyframes fadeIn {
-          from { opacity: 0; transform: scale(0.95); }
-          to { opacity: 1; transform: scale(1); }
-        }
-      `}</style>
+      {selectedJob && (
+         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
+            <div className="glass w-full max-w-2xl p-8 rounded-3xl shadow-2xl relative mt-32 md:mt-0">
+               <button onClick={() => setSelectedJob(null)} className="absolute top-6 right-6 text-gray-400 hover:text-white font-bold text-xl">&times;</button>
+               <h2 className="text-3xl font-bold mb-2 text-glow">Apply for {selectedJob.title}</h2>
+               <p className="text-teal-300 mb-6">{selectedJob.company}</p>
+
+               {applySuccess ? (
+                  <div className="bg-green-500/20 text-green-200 border border-green-500/50 p-4 rounded-xl text-center font-bold">{applySuccess}</div>
+               ) : (
+                 <form onSubmit={handleApply} className="space-y-6">
+                    {applyErr && <div className="bg-red-500/20 text-red-200 border border-red-500/50 p-3 rounded-xl">{applyErr}</div>}
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-xs text-gray-400 mb-1 block">Full Name</label>
+                        <input required value={applyForm.name} onChange={e => setApplyForm({...applyForm, name: e.target.value})} className="w-full bg-black/20 rounded-xl p-3 border border-white/10" />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-400 mb-1 block">Email</label>
+                        <input type="email" required value={applyForm.email} onChange={e => setApplyForm({...applyForm, email: e.target.value})} className="w-full bg-black/20 rounded-xl p-3 border border-white/10" />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-400 mb-1 block">Phone</label>
+                        <input required value={applyForm.phone} onChange={e => setApplyForm({...applyForm, phone: e.target.value})} className="w-full bg-black/20 rounded-xl p-3 border border-white/10" />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-400 mb-1 block">Age</label>
+                        <input type="number" required value={applyForm.age} onChange={e => setApplyForm({...applyForm, age: e.target.value})} className="w-full bg-black/20 rounded-xl p-3 border border-white/10" />
+                      </div>
+                    </div>
+
+                    <div className="border-t border-white/10 pt-4">
+                      <h3 className="text-lg font-semibold mb-4 text-gray-200">Eligibility & Qualifications</h3>
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <label className="text-xs text-gray-400 mb-1 block">Experience (Yrs)</label>
+                          <input type="number" required value={applyForm.experience} onChange={e => setApplyForm({...applyForm, experience: e.target.value})} className="w-full bg-black/20 rounded-xl p-2 border border-white/10" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-400 mb-1 block">CGPA</label>
+                          <input type="number" step="0.1" required value={applyForm.cgpa} onChange={e => setApplyForm({...applyForm, cgpa: e.target.value})} className="w-full bg-black/20 rounded-xl p-2 border border-white/10" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-400 mb-1 block">Highest Degree</label>
+                          <input required value={applyForm.degree} onChange={e => setApplyForm({...applyForm, degree: e.target.value})} className="w-full bg-black/20 rounded-xl p-2 border border-white/10" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-400 mb-1 block">Location</label>
+                          <input required value={applyForm.location} onChange={e => setApplyForm({...applyForm, location: e.target.value})} className="w-full bg-black/20 rounded-xl p-2 border border-white/10" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-gray-400 mb-1 block">Gender</label>
+                          <select required value={applyForm.gender} onChange={e => setApplyForm({...applyForm, gender: e.target.value})} className="w-full bg-black/20 rounded-xl p-2 border border-white/10 text-gray-200 [&>option]:text-black">
+                             <option>Male</option><option>Female</option><option>Other</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 border-t border-white/10 pt-4">
+                      <div>
+                        <label className="text-xs font-semibold text-teal-300 mb-1 block">Resume (used for semantic matching)</label>
+                        <input type="file" required accept=".png,.jpg,.jpeg" onChange={e => setResume(e.target.files?.[0] || null)} className="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-teal-500/20 file:text-teal-300 hover:file:bg-teal-500/30" />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-indigo-300 mb-1 block">Certificate (Optional - 10 Bonus Pts)</label>
+                        <input type="file" accept=".png,.jpg,.jpeg,.pdf" onChange={e => setCertificate(e.target.files?.[0] || null)} className="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-indigo-500/20 file:text-indigo-300 hover:file:bg-indigo-500/30" />
+                      </div>
+                    </div>
+
+                    {selectedJob.integrityCheck?.enabled && (
+                       <div className="border-t border-white/10 pt-4">
+                         <h3 className="text-sm font-semibold mb-2 text-yellow-300">Integrity Check ({selectedJob.integrityCheck.weight}% Weight)</h3>
+                         <ul className="text-xs text-gray-400 list-disc pl-5 mb-2">
+                           {selectedJob.integrityCheck.questions.map((q: string, i: number) => <li key={i}>{q}</li>)}
+                         </ul>
+                         <textarea 
+                           required rows={3} placeholder="Answer the integerity questions comprehensively here..." 
+                           value={applyForm.integrityAnswers} onChange={e => setApplyForm({...applyForm, integrityAnswers: e.target.value})}
+                           className="w-full bg-black/20 rounded-xl p-3 border border-white/10 mt-2"
+                         />
+                       </div>
+                    )}
+
+                    <button type="submit" disabled={applyLoading} className="w-full py-4 rounded-xl font-bold bg-gradient-to-r from-blue-500 to-indigo-600 hover:opacity-90 shadow-lg text-lg">
+                      {applyLoading ? "Processing Encryption & AI Checks..." : "Submit Zero-Knowledge Application"}
+                    </button>
+                 </form>
+               )}
+            </div>
+         </div>
+      )}
     </div>
   );
-}
+};
+
+export default CandidateHome;

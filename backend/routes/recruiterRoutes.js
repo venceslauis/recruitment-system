@@ -4,28 +4,43 @@ const Job = require("../models/Job");
 const Application = require("../models/Application");
 
 /* =========================
-   POST JOB (with skill criteria & weightage)
+   POST JOB
 ========================= */
 
 router.post("/postJob", async (req, res) => {
 
   try {
 
-    const { title, company, description, skills, skillCriteria, recruiterId } = req.body;
+    const { title, company, description, eligibility, skillCriteria, integrityCheck, recruiterId } = req.body;
+
+    // Validate weights total to 100 or 1.0 depending on scale used. Assume scale is 100 here.
+    let totalWeight = 0;
+    if (skillCriteria && skillCriteria.length > 0) {
+      totalWeight += skillCriteria.reduce((sum, s) => sum + s.weight, 0);
+    }
+    if (integrityCheck && integrityCheck.enabled) {
+      totalWeight += integrityCheck.weight || 0;
+    }
+
+    if (totalWeight !== 100 && totalWeight !== 1) {
+       return res.status(400).json({ error: "Total weightage (skills + integrity) must equal 100 or 1.0" });
+    }
 
     const job = new Job({
       title,
       company,
       description,
-      skills,
-      skillCriteria,       // [{ skill: "react", weight: 30 }, { skill: "node", weight: 25 }, ...]
+      eligibility,
+      skillCriteria,
+      integrityCheck,
       recruiterId
     });
 
     await job.save();
 
     res.json({
-      message: "Job posted successfully"
+      message: "Job posted successfully",
+      job
     });
 
   } catch (err) {
@@ -46,19 +61,20 @@ router.post("/postJob", async (req, res) => {
 
 router.get("/myJobs/:recruiterId", async (req, res) => {
 
-  const jobs = await Job.find({
-    recruiterId: req.params.recruiterId
-  });
+  try {
+    const jobs = await Job.find({
+      recruiterId: req.params.recruiterId
+    });
 
-  res.json(jobs);
+    res.json(jobs);
+  } catch(err) {
+    res.status(500).json({ error: "Failed to fetch jobs" });
+  }
 
 });
 
 /* =========================
    GET APPLICANT RANKINGS
-   Privacy: returns ONLY rank, matchScore,
-   and matched skill categories.
-   NO candidate personal details (name, age).
 ========================= */
 
 router.get("/applicants/:jobId", async (req, res) => {
@@ -71,11 +87,14 @@ router.get("/applicants/:jobId", async (req, res) => {
       .populate("jobId")
       .sort({ matchScore: -1 });
 
-    // Build anonymized ranking — no candidate personal info
     const rankings = apps.map((app, index) => ({
       _id: app._id,
       rank: index + 1,
+      name: app.name,
+      email: app.email,
+      phone: app.phone,
       matchScore: app.matchScore,
+      scoreDetails: app.scoreDetails,
       resumeSkills: app.resumeSkills,
       zkpProofHash: app.zkpProofHash,
       appliedAt: app.appliedAt
@@ -101,8 +120,12 @@ router.get("/applicants/:jobId", async (req, res) => {
 
 router.get("/allJobs", async (req, res) => {
 
-  const jobs = await Job.find();
-  res.json(jobs);
+  try {
+    const jobs = await Job.find().sort({ createdAt: -1 });
+    res.json(jobs);
+  } catch(err) {
+    res.status(500).json({ error: "Failed to fetch all jobs" });
+  }
 
 });
 

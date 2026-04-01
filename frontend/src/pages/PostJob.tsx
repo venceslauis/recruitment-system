@@ -1,382 +1,196 @@
-import { useState } from "react";
-import axios from "axios";
-import BackButton from "../components/BackButton";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import API from "../services/api";
 
-interface SkillCriteria {
-  skill: string;
-  weight: number;
-}
-
-export default function PostJob() {
-
+const PostJob: React.FC = () => {
   const navigate = useNavigate();
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+
   const [title, setTitle] = useState("");
-  const [company, setCompany] = useState("");
   const [description, setDescription] = useState("");
+  const [company, setCompany] = useState("");
 
-  // Skill criteria with weightage
-  const [skillCriteria, setSkillCriteria] = useState<SkillCriteria[]>([
-    { skill: "", weight: 0 }
-  ]);
+  const [eligibility, setEligibility] = useState({
+    experience: 0,
+    cgpa: 0,
+    degree: "",
+    location: "",
+    gender: "Any",
+    age: 0
+  });
 
-  const totalWeight = skillCriteria.reduce((sum, c) => sum + c.weight, 0);
+  const [skills, setSkills] = useState<{skill: string, weight: number}[]>([]);
+  const [currentSkill, setCurrentSkill] = useState("");
+  const [currentWeight, setCurrentWeight] = useState(0);
 
-  const addSkillCriteria = () => {
-    setSkillCriteria([...skillCriteria, { skill: "", weight: 0 }]);
-  };
+  const [integrityEnabled, setIntegrityEnabled] = useState(false);
+  const [integrityWeight, setIntegrityWeight] = useState(0);
+  const [integrityQuestions, setIntegrityQuestions] = useState<string[]>([]);
+  const [currentQuestion, setCurrentQuestion] = useState("");
 
-  const removeSkillCriteria = (index: number) => {
-    setSkillCriteria(skillCriteria.filter((_, i) => i !== index));
-  };
+  const totalCurrentWeight = skills.reduce((sum, s) => sum + s.weight, 0) + (integrityEnabled ? integrityWeight : 0);
 
-  const updateSkillCriteria = (index: number, field: keyof SkillCriteria, value: string | number) => {
-    const updated = [...skillCriteria];
-    if (field === "weight") {
-      updated[index][field] = Number(value);
-    } else {
-      updated[index][field] = String(value);
+  const addSkill = () => {
+    if (currentSkill && currentWeight > 0) {
+      setSkills([...skills, { skill: currentSkill.toLowerCase(), weight: currentWeight }]);
+      setCurrentSkill("");
+      setCurrentWeight(0);
     }
-    setSkillCriteria(updated);
   };
 
-  const postJob = async () => {
-    // Validate
-    const validCriteria = skillCriteria.filter(c => c.skill.trim() !== "");
+  const addQuestion = () => {
+    if (currentQuestion) {
+      setIntegrityQuestions([...integrityQuestions, currentQuestion]);
+      setCurrentQuestion("");
+    }
+  };
 
-    if (validCriteria.length === 0) {
-      alert("Please add at least one skill criteria");
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (totalCurrentWeight !== 100) {
+      setErr("Total skill weight + integrity weight must equal 100.");
       return;
     }
-
-    const total = validCriteria.reduce((sum, c) => sum + c.weight, 0);
-    if (total !== 100) {
-      alert(`Skill weights must sum to 100%. Current total: ${total}%`);
-      return;
-    }
-
-    const skillArray = validCriteria.map(c => c.skill.trim().toLowerCase());
-    const recruiterId = localStorage.getItem("userId");
+    setLoading(true);
+    setErr("");
     
-    if (!recruiterId) {
-      alert("Error: You must be logged in to post a job.");
-      navigate("/");
-      return;
+    try {
+      const recruiterId = localStorage.getItem("userId");
+      await API.post("/recruiter/postJob", {
+        title, company, description,
+        eligibility,
+        skillCriteria: skills,
+        integrityCheck: {
+          enabled: integrityEnabled,
+          weight: integrityWeight,
+          questions: integrityQuestions
+        },
+        recruiterId
+      });
+      navigate("/recruiter/home");
+    } catch (e: any) {
+      setErr(e.response?.data?.error || "Failed to post job");
+    } finally {
+      setLoading(false);
     }
-
-    await axios.post("http://localhost:5000/api/recruiter/postJob", {
-      title, company, description,
-      recruiterId,
-      skills: skillArray,
-      skillCriteria: validCriteria.map(c => ({
-        skill: c.skill.trim().toLowerCase(),
-        weight: c.weight
-      }))
-    });
-    alert("Job posted successfully");
-    navigate("/recruiter/home");
-  };
-
-  const inputStyle: React.CSSProperties = {
-    width: "100%",
-    background: "#f8fafc",
-    border: "1px solid #cbd5e1",
-    borderRadius: 12,
-    padding: "16px 18px",
-    color: "#0f172a",
-    fontSize: "1rem",
-    outline: "none",
-    transition: "all 0.2s",
-    boxSizing: "border-box"
-  };
-
-  const labelStyle: React.CSSProperties = {
-    color: "#334155",
-    fontSize: "0.9rem",
-    fontWeight: 700,
-    marginBottom: 8,
-    display: "block",
-    letterSpacing: "0.01em"
   };
 
   return (
-    <div style={{
-      background: "#f1f5f9",
-      minHeight: "100vh",
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      padding: "40px 20px"
-    }}>
-
-      <div style={{ width: "100%", maxWidth: 700 }}>
-        <BackButton />
-
-        <div style={{
-          background: "#ffffff",
-          border: "1px solid #e2e8f0",
-          borderRadius: 24,
-          padding: "48px 40px",
-          boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01)"
-        }}>
-
-          {/* Header */}
-          <div style={{ textAlign: "center", marginBottom: 36 }}>
-            <div style={{
-              width: 56, height: 56, borderRadius: 16,
-              background: "linear-gradient(135deg, #4f46e5, #3b82f6)",
-              display: "inline-flex", alignItems: "center", justifyContent: "center",
-              fontSize: 26, marginBottom: 16,
-              boxShadow: "0 10px 15px -3px rgba(59, 130, 246, 0.3)"
-            }}>📝</div>
-            <h2 style={{ color: "#0f172a", fontSize: "1.75rem", fontWeight: 800, margin: 0, letterSpacing: "-0.02em" }}>
-              Post a New Job
-            </h2>
-            <p style={{ color: "#64748b", margin: "8px 0 0 0", fontSize: "1rem" }}>
-              Define the role and set ZKP-based skill criteria for candidate matching.
-            </p>
+    <div className="min-h-screen p-8 mt-16 flex justify-center text-white">
+      <div className="glass w-full max-w-4xl p-8 rounded-3xl relative">
+        <h2 className="text-3xl font-bold mb-6 text-glow">Post a New Job</h2>
+        {err && <div className="bg-red-500/20 text-red-200 p-4 rounded-xl mb-6">{err}</div>}
+        
+        <form onSubmit={handleSubmit} className="space-y-8">
+          
+          <div className="grid grid-cols-2 gap-6">
+            <div className="col-span-2">
+              <label className="block text-sm mb-2 text-gray-300">Job Title</label>
+              <input required maxLength={50} value={title} onChange={e => setTitle(e.target.value)} className="w-full bg-black/20 rounded-xl p-3 border border-white/10" placeholder="e.g. Senior Frontend Developer" />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-sm mb-2 text-gray-300">Company</label>
+              <input required value={company} onChange={e => setCompany(e.target.value)} className="w-full bg-black/20 rounded-xl p-3 border border-white/10" />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-sm mb-2 text-gray-300">Job Description (Max 500 words)</label>
+              <textarea required rows={4} value={description} onChange={e => setDescription(e.target.value)} className="w-full bg-black/20 rounded-xl p-3 border border-white/10" />
+            </div>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-
-            <div>
-              <label style={labelStyle}>Job Title</label>
-              <input
-                style={inputStyle}
-                placeholder="e.g. Frontend Developer"
-                value={title}
-                onFocus={e => {
-                  e.currentTarget.style.borderColor = "#4f46e5";
-                  e.currentTarget.style.background = "#ffffff";
-                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(79, 70, 229, 0.1)";
-                }}
-                onBlur={e => {
-                  e.currentTarget.style.borderColor = "#cbd5e1";
-                  e.currentTarget.style.background = "#f8fafc";
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-                onChange={e => setTitle(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>Company</label>
-              <input
-                style={inputStyle}
-                placeholder="Company Name"
-                value={company}
-                onFocus={e => {
-                  e.currentTarget.style.borderColor = "#4f46e5";
-                  e.currentTarget.style.background = "#ffffff";
-                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(79, 70, 229, 0.1)";
-                }}
-                onBlur={e => {
-                  e.currentTarget.style.borderColor = "#cbd5e1";
-                  e.currentTarget.style.background = "#f8fafc";
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-                onChange={e => setCompany(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>Job Description</label>
-              <textarea
-                style={{
-                  ...inputStyle,
-                  height: 120,
-                  resize: "none",
-                  fontFamily: "inherit",
-                  lineHeight: 1.6
-                }}
-                placeholder="Describe the job role, responsibilities, etc."
-                value={description}
-                onFocus={e => {
-                  e.currentTarget.style.borderColor = "#4f46e5";
-                  e.currentTarget.style.background = "#ffffff";
-                  e.currentTarget.style.boxShadow = "0 0 0 3px rgba(79, 70, 229, 0.1)";
-                }}
-                onBlur={e => {
-                  e.currentTarget.style.borderColor = "#cbd5e1";
-                  e.currentTarget.style.background = "#f8fafc";
-                  e.currentTarget.style.boxShadow = "none";
-                }}
-                onChange={e => setDescription(e.target.value)}
-              />
-            </div>
-
-            {/* ZKP Skill Criteria Section */}
-            <div>
-              <label style={labelStyle}>
-                🔐 ZKP Skill Criteria & Weightage
-              </label>
-              <p style={{ color: "#64748b", fontSize: "0.85rem", margin: "0 0 16px 0", fontWeight: 500 }}>
-                Define required skills and assign weights that sum to 100%. Candidates will be scored using ZKP circuits based on these criteria.
-              </p>
-
-              <div style={{
-                background: "#faf5ff",
-                border: "1px solid #e9d5ff",
-                borderRadius: 16,
-                padding: "24px",
-              }}>
-
-                {skillCriteria.map((criteria, index) => (
-                  <div key={index} style={{
-                    display: "flex",
-                    gap: 12,
-                    alignItems: "center",
-                    marginBottom: index < skillCriteria.length - 1 ? 12 : 0
-                  }}>
-                    <div style={{ flex: 1 }}>
-                      <input
-                        style={{
-                          ...inputStyle,
-                          background: "#ffffff",
-                          padding: "12px 14px"
-                        }}
-                        placeholder="Skill name (e.g. react)"
-                        value={criteria.skill}
-                        onChange={e => updateSkillCriteria(index, "skill", e.target.value)}
-                      />
-                    </div>
-                    <div style={{ width: 100 }}>
-                      <input
-                        type="number"
-                        style={{
-                          ...inputStyle,
-                          background: "#ffffff",
-                          padding: "12px 14px",
-                          textAlign: "center"
-                        }}
-                        placeholder="%"
-                        min={0}
-                        max={100}
-                        value={criteria.weight || ""}
-                        onChange={e => updateSkillCriteria(index, "weight", e.target.value)}
-                      />
-                    </div>
-                    {skillCriteria.length > 1 && (
-                      <button
-                        onClick={() => removeSkillCriteria(index)}
-                        style={{
-                          background: "#fef2f2",
-                          color: "#dc2626",
-                          border: "1px solid #fecaca",
-                          borderRadius: 10,
-                          width: 36, height: 36,
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          cursor: "pointer",
-                          fontSize: "1.1rem",
-                          fontWeight: 700,
-                          transition: "all 0.2s",
-                          flexShrink: 0
-                        }}
-                        onMouseEnter={e => {
-                          e.currentTarget.style.background = "#fee2e2";
-                        }}
-                        onMouseLeave={e => {
-                          e.currentTarget.style.background = "#fef2f2";
-                        }}
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                ))}
-
-                {/* Add skill button */}
-                <button
-                  onClick={addSkillCriteria}
-                  style={{
-                    background: "transparent",
-                    color: "#7c3aed",
-                    border: "1px dashed #c4b5fd",
-                    borderRadius: 10,
-                    padding: "10px 18px",
-                    fontWeight: 700,
-                    fontSize: "0.9rem",
-                    cursor: "pointer",
-                    width: "100%",
-                    marginTop: 12,
-                    transition: "all 0.2s"
-                  }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.background = "#f5f3ff";
-                    e.currentTarget.style.borderColor = "#a78bfa";
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.background = "transparent";
-                    e.currentTarget.style.borderColor = "#c4b5fd";
-                  }}
-                >
-                  + Add Skill Criteria
-                </button>
-
-                {/* Weight total indicator */}
-                <div style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginTop: 16,
-                  paddingTop: 16,
-                  borderTop: "1px solid #e9d5ff"
-                }}>
-                  <span style={{ color: "#6b21a8", fontWeight: 700, fontSize: "0.9rem" }}>
-                    Total Weight
-                  </span>
-                  <span style={{
-                    background: totalWeight === 100 ? "#dcfce7" : "#fef2f2",
-                    color: totalWeight === 100 ? "#16a34a" : "#dc2626",
-                    fontWeight: 800,
-                    fontSize: "0.95rem",
-                    padding: "6px 16px",
-                    borderRadius: 999,
-                    border: `1px solid ${totalWeight === 100 ? "#bbf7d0" : "#fecaca"}`
-                  }}>
-                    {totalWeight}% {totalWeight === 100 ? "✓" : `(need 100%)`}
-                  </span>
-                </div>
+          <div className="bg-white/5 p-6 rounded-2xl border border-white/10">
+            <h3 className="text-xl font-semibold mb-4 text-teal-300">Eligibility Criteria (ZKP Rules)</h3>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="text-xs text-gray-400">Min Experience (Yrs)</label>
+                <input type="number" min="0" value={eligibility.experience} onChange={e => setEligibility({...eligibility, experience: +e.target.value})} className="w-full bg-black/20 rounded-xl p-2 border border-white/10" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400">Min CGPA</label>
+                <input type="number" step="0.1" max="10" value={eligibility.cgpa} onChange={e => setEligibility({...eligibility, cgpa: +e.target.value})} className="w-full bg-black/20 rounded-xl p-2 border border-white/10" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400">Max Age</label>
+                <input type="number" min="0" value={eligibility.age} onChange={e => setEligibility({...eligibility, age: +e.target.value})} className="w-full bg-black/20 rounded-xl p-2 border border-white/10" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400">Required Degree</label>
+                <input placeholder="e.g. B.Tech" value={eligibility.degree} onChange={e => setEligibility({...eligibility, degree: e.target.value})} className="w-full bg-black/20 rounded-xl p-2 border border-white/10" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400">Location</label>
+                <input placeholder="e.g. Remote" value={eligibility.location} onChange={e => setEligibility({...eligibility, location: e.target.value})} className="w-full bg-black/20 rounded-xl p-2 border border-white/10" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-400">Gender</label>
+                <select value={eligibility.gender} onChange={e => setEligibility({...eligibility, gender: e.target.value})} className="w-full bg-black/20 rounded-xl p-2 border border-white/10 text-gray-200 [&>option]:text-black">
+                  <option>Any</option>
+                  <option>Male</option>
+                  <option>Female</option>
+                </select>
               </div>
             </div>
-
-            <button
-              onClick={postJob}
-              style={{
-                background: totalWeight === 100
-                  ? "linear-gradient(135deg, #4f46e5, #3b82f6)"
-                  : "#94a3b8",
-                color: "#fff",
-                border: "none",
-                borderRadius: 12,
-                padding: "16px",
-                fontWeight: 700,
-                fontSize: "1rem",
-                cursor: totalWeight === 100 ? "pointer" : "not-allowed",
-                transition: "transform 0.2s, box-shadow 0.2s",
-                marginTop: 12,
-                boxShadow: totalWeight === 100 ? "0 4px 6px -1px rgba(79, 70, 229, 0.2)" : "none"
-              }}
-              onMouseEnter={e => {
-                if (totalWeight === 100) {
-                  e.currentTarget.style.transform = "translateY(-1px)";
-                  e.currentTarget.style.boxShadow = "0 10px 15px -3px rgba(79, 70, 229, 0.3)";
-                }
-              }}
-              onMouseLeave={e => {
-                if (totalWeight === 100) {
-                  e.currentTarget.style.transform = "translateY(0)";
-                  e.currentTarget.style.boxShadow = "0 4px 6px -1px rgba(79, 70, 229, 0.2)";
-                }
-              }}
-            >
-              🚀 Publish Job
-            </button>
-
           </div>
 
-        </div>
+          <div className="bg-white/5 p-6 rounded-2xl border border-white/10">
+            <h3 className="text-xl font-semibold mb-2 text-indigo-300 flex justify-between">
+              <span>Skill & Integrity Weights</span>
+              <span className={totalCurrentWeight === 100 ? "text-green-400" : "text-yellow-400"}>
+                Total: {totalCurrentWeight}/100
+              </span>
+            </h3>
+            <p className="text-sm text-gray-400 mb-4">You must distribute exactly 100 points among skills and integrity checks.</p>
+            
+            <div className="flex gap-4 mb-4">
+              <input placeholder="Skill Name (e.g. React)" value={currentSkill} onChange={e => setCurrentSkill(e.target.value)} className="flex-1 bg-black/20 rounded-xl p-3 border border-white/10" />
+              <input type="number" placeholder="Weight (e.g. 30)" value={currentWeight || ""} onChange={e => setCurrentWeight(+e.target.value)} className="w-32 bg-black/20 rounded-xl p-3 border border-white/10" />
+              <button type="button" onClick={addSkill} className="bg-indigo-600 hover:bg-indigo-500 px-6 rounded-xl font-semibold">Add</button>
+            </div>
+            
+            <div className="flex flex-wrap gap-2 mb-6">
+              {skills.map((s, i) => (
+                <div key={i} className="bg-indigo-900/50 text-indigo-100 px-4 py-2 rounded-full text-sm border border-indigo-500/30 flex items-center gap-2">
+                  <span>{s.skill} ({s.weight}%)</span>
+                  <button type="button" onClick={() => setSkills(skills.filter((_, idx) => idx !== i))} className="text-red-400 hover:text-red-300 font-bold ml-2">×</button>
+                </div>
+              ))}
+            </div>
+
+            <div className="border-t border-white/10 pt-4">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input type="checkbox" checked={integrityEnabled} onChange={e => setIntegrityEnabled(e.target.checked)} className="w-5 h-5 rounded border-gray-300" />
+                <span className="font-semibold text-gray-200">Enable AI Integrity Check</span>
+              </label>
+
+              {integrityEnabled && (
+                <div className="mt-4 space-y-4 pl-8">
+                  <div>
+                    <label className="block text-sm mb-1 text-gray-400">Integrity Weight (e.g. 20%)</label>
+                    <input type="number" value={integrityWeight || ""} onChange={e => setIntegrityWeight(+e.target.value)} className="w-32 bg-black/20 rounded-xl p-2 border border-white/10" />
+                  </div>
+                  <div className="flex gap-4">
+                     <input placeholder="Add custom integrity question (e.g. Are you willing to work night shifts?)" value={currentQuestion} onChange={e => setCurrentQuestion(e.target.value)} className="flex-1 bg-black/20 rounded-xl p-3 border border-white/10" />
+                     <button type="button" onClick={addQuestion} className="bg-teal-600 hover:bg-teal-500 px-6 rounded-xl font-semibold">Add</button>
+                  </div>
+                  <ul className="list-disc pl-5 text-gray-300 text-sm space-y-1">
+                    {integrityQuestions.map((q, i) => <li key={i}>{q} <button type="button" onClick={() => setIntegrityQuestions(integrityQuestions.filter((_, idx) => idx !== i))} className="text-red-400 ml-2">Remove</button></li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-4 mt-8">
+             <button type="button" onClick={() => navigate("/recruiter/home")} className="px-6 py-3 rounded-xl border border-white/20 hover:bg-white/10 font-semibold transition">Cancel</button>
+             <button type="submit" disabled={loading || totalCurrentWeight !== 100} className="px-8 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed font-bold">
+               {loading ? "Posting..." : "Post Job Live"}
+             </button>
+          </div>
+
+        </form>
       </div>
     </div>
   );
-}
+};
+export default PostJob;
