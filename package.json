@@ -1,4 +1,12 @@
 {
+  "name": "privacy-job-portal",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "npx concurrently \"npm run ml-service\" \"npm run server\" \"npm run client\"",
+    "ml-service": "cd sbert-service && python app.py",
+    "server": "cd backend && node app.js",
+    "client": "cd frontend && npm start"
+  },
   "dependencies": {
     "axios": "^1.13.6",
     "bcryptjs": "^3.0.3",

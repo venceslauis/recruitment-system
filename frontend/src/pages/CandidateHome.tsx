@@ -13,7 +13,7 @@ const CandidateHome: React.FC = () => {
     name: "", email: "", phone: "", age: "", experience: "", cgpa: "", degree: "", location: "", gender: "Any", integrityAnswers: ""
   });
   const [resume, setResume] = useState<File | null>(null);
-  const [certificate, setCertificate] = useState<File | null>(null);
+  const [certificates, setCertificates] = useState<File[]>([]);
   const [applyLoading, setApplyLoading] = useState(false);
   const [applyErr, setApplyErr] = useState("");
   const [applySuccess, setApplySuccess] = useState("");
@@ -34,6 +34,14 @@ const CandidateHome: React.FC = () => {
 
   const handleApply = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!resume) {
+       setApplyErr("Please upload your resume.");
+       return;
+    }
+    if (applyForm.phone.length !== 10) {
+       setApplyErr("Phone number must be exactly 10 digits.");
+       return;
+    }
     setApplyLoading(true); setApplyErr(""); setApplySuccess("");
     
     const formData = new FormData();
@@ -41,7 +49,7 @@ const CandidateHome: React.FC = () => {
     formData.append("candidateId", localStorage.getItem("candidateId") || "");
     Object.entries(applyForm).forEach(([k, v]) => formData.append(k, v));
     if (resume) formData.append("resume", resume);
-    if (certificate) formData.append("certificate", certificate);
+    certificates.forEach(cert => formData.append("certificate", cert));
 
     try {
       const { data } = await API.post("/candidate/apply", formData, {
@@ -51,6 +59,12 @@ const CandidateHome: React.FC = () => {
       setTimeout(() => {
         setSelectedJob(null);
         setApplySuccess("");
+        // Reset form completely
+        setApplyForm({
+          name: "", email: "", phone: "", age: "", experience: "", cgpa: "", degree: "", location: "", gender: "Any", integrityAnswers: ""
+        });
+        setResume(null);
+        setCertificates([]);
       }, 2000);
     } catch(err: any) {
       setApplyErr(err.response?.data?.message || "Application Failed");
@@ -117,8 +131,12 @@ const CandidateHome: React.FC = () => {
       {selectedJob && (
          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
             <div className="glass w-full max-w-2xl p-8 rounded-3xl shadow-2xl relative mt-32 md:mt-0">
-               <button onClick={() => setSelectedJob(null)} className="absolute top-6 right-6 text-gray-400 hover:text-white font-bold text-xl">&times;</button>
-               <h2 className="text-3xl font-bold mb-2 text-glow">Apply for {selectedJob.title}</h2>
+               {/* Explicit close button right on top corner */}
+               <button onClick={() => setSelectedJob(null)} className="absolute top-4 right-4 bg-white/10 hover:bg-white/20 text-white rounded-full p-2 font-bold text-xl inline-flex items-center justify-center w-10 h-10 transition z-50">
+                 &times;
+               </button>
+               
+               <h2 className="text-3xl font-bold mb-2 text-glow pr-10">Apply for {selectedJob.title}</h2>
                <p className="text-teal-300 mb-6">{selectedJob.company}</p>
 
                {applySuccess ? (
@@ -138,7 +156,10 @@ const CandidateHome: React.FC = () => {
                       </div>
                       <div>
                         <label className="text-xs text-gray-400 mb-1 block">Phone</label>
-                        <input required value={applyForm.phone} onChange={e => setApplyForm({...applyForm, phone: e.target.value})} className="w-full bg-black/20 rounded-xl p-3 border border-white/10" />
+                        <input type="tel" maxLength={10} required value={applyForm.phone} onChange={e => {
+                          const val = e.target.value.replace(/\D/g, "");
+                          setApplyForm({...applyForm, phone: val});
+                        }} className="w-full bg-black/20 rounded-xl p-3 border border-white/10" placeholder="10 Digits" />
                       </div>
                       <div>
                         <label className="text-xs text-gray-400 mb-1 block">Age</label>
@@ -177,11 +198,39 @@ const CandidateHome: React.FC = () => {
                     <div className="grid grid-cols-2 gap-4 border-t border-white/10 pt-4">
                       <div>
                         <label className="text-xs font-semibold text-teal-300 mb-1 block">Resume (used for semantic matching)</label>
-                        <input type="file" required accept=".png,.jpg,.jpeg" onChange={e => setResume(e.target.files?.[0] || null)} className="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-teal-500/20 file:text-teal-300 hover:file:bg-teal-500/30" />
+                        {!resume ? (
+                           <input type="file" accept=".png,.jpg,.jpeg" onChange={e => setResume(e.target.files?.[0] || null)} className="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-teal-500/20 file:text-teal-300 hover:file:bg-teal-500/30" />
+                        ) : (
+                           <div className="flex items-center justify-between text-sm bg-black/20 px-3 py-2 rounded-xl border border-teal-500/30">
+                             <span className="truncate flex-1 text-teal-200" title={resume.name}>{resume.name}</span>
+                             <button type="button" onClick={() => setResume(null)} className="text-red-400 hover:text-red-300 font-bold ml-2">Remove</button>
+                           </div>
+                        )}
                       </div>
                       <div>
-                        <label className="text-xs font-semibold text-indigo-300 mb-1 block">Certificate (Optional - 10 Bonus Pts)</label>
-                        <input type="file" accept=".png,.jpg,.jpeg,.pdf" onChange={e => setCertificate(e.target.files?.[0] || null)} className="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-indigo-500/20 file:text-indigo-300 hover:file:bg-indigo-500/30" />
+                        <label className="text-xs font-semibold text-indigo-300 mb-1 block">Certificates (Max 1MB each - Bonus Pts)</label>
+                        <input type="file" multiple accept=".png,.jpg,.jpeg,.pdf" onChange={e => {
+                            if(e.target.files) {
+                               const selected = Array.from(e.target.files);
+                               const valid = selected.filter(f => {
+                                  if(f.size > 1024 * 1024) { alert(`File ${f.name} exceeds 1MB`); return false; }
+                                  return true;
+                               });
+                               setCertificates(prev => [...prev, ...valid]);
+                            }
+                            e.target.value = "";
+                        }} className="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-indigo-500/20 file:text-indigo-300 hover:file:bg-indigo-500/30" />
+                        
+                        {certificates.length > 0 && (
+                           <div className="mt-2 space-y-2 max-h-24 overflow-y-auto pr-2">
+                             {certificates.map((cert, idx) => (
+                               <div key={idx} className="flex items-center justify-between text-xs bg-black/20 px-2 py-1 rounded bg-indigo-500/10 border border-indigo-500/20">
+                                  <span className="truncate flex-1" title={cert.name}>{cert.name}</span>
+                                  <button type="button" onClick={() => setCertificates(certificates.filter((_, i) => i !== idx))} className="text-red-400 hover:text-red-300 ml-2">Remove</button>
+                               </div>
+                             ))}
+                           </div>
+                        )}
                       </div>
                     </div>
 
@@ -199,9 +248,14 @@ const CandidateHome: React.FC = () => {
                        </div>
                     )}
 
-                    <button type="submit" disabled={applyLoading} className="w-full py-4 rounded-xl font-bold bg-gradient-to-r from-blue-500 to-indigo-600 hover:opacity-90 shadow-lg text-lg">
-                      {applyLoading ? "Processing Encryption & AI Checks..." : "Submit Zero-Knowledge Application"}
-                    </button>
+                    <div className="flex gap-4">
+                      <button type="button" onClick={() => setSelectedJob(null)} className="w-1/3 py-4 rounded-xl font-bold border border-white/20 hover:bg-white/10 transition-colors">
+                        Cancel
+                      </button>
+                      <button type="submit" disabled={applyLoading} className="w-2/3 py-4 rounded-xl font-bold bg-gradient-to-r from-blue-500 to-indigo-600 hover:opacity-90 shadow-lg text-lg">
+                        {applyLoading ? "Processing Encryption..." : "Submit Application"}
+                      </button>
+                    </div>
                  </form>
                )}
             </div>

@@ -79,7 +79,10 @@ const PostJob: React.FC = () => {
   return (
     <div className="min-h-screen p-8 mt-16 flex justify-center text-white">
       <div className="glass w-full max-w-4xl p-8 rounded-3xl relative">
-        <h2 className="text-3xl font-bold mb-6 text-glow">Post a New Job</h2>
+        <button type="button" onClick={() => navigate("/recruiter/home")} className="absolute top-6 right-6 text-gray-400 hover:text-white font-bold text-2xl transition-colors cursor-pointer inline-flex items-center justify-center w-10 h-10 bg-white/5 hover:bg-white/10 rounded-full z-10">
+          &times;
+        </button>
+        <h2 className="text-3xl font-bold mb-6 text-glow pr-8">Post a New Job</h2>
         {err && <div className="bg-red-500/20 text-red-200 p-4 rounded-xl mb-6">{err}</div>}
         
         <form onSubmit={handleSubmit} className="space-y-8">

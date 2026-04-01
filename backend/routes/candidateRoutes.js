@@ -32,7 +32,7 @@ router.get("/jobs", async (req, res) => {
 
 router.post(
   "/apply",
-  upload.fields([{ name: "resume", maxCount: 1 }, { name: "certificate", maxCount: 1 }]),
+  upload.fields([{ name: "resume", maxCount: 1 }, { name: "certificate", maxCount: 5 }]),
   async (req, res) => {
     try {
       const { 
@@ -124,8 +124,8 @@ router.post(
       }
 
       // 3. Certificate Bonus
-      const certificateFile = req.files['certificate'] ? req.files['certificate'][0] : null;
-      if (certificateFile) {
+      const certificateFiles = req.files['certificate'];
+      if (certificateFiles && certificateFiles.length > 0) {
          certificateBonus = 10; // fixed 10 points bonus per instruction
       }
 
@@ -162,14 +162,14 @@ router.post(
   }
 );
 
-router.get("/myApplications/:email", async (req, res) => {
+router.get("/myApplications/:candidateId", async (req, res) => {
   try {
-    const email = req.params.email;
-    if (!email || email === "null") {
-      return res.status(400).json({ message: "Invalid email" });
+    const candidateId = req.params.candidateId;
+    if (!candidateId || candidateId === "null") {
+      return res.status(400).json({ message: "Invalid candidate details" });
     }
 
-    const apps = await Application.find({ email }).populate("jobId");
+    const apps = await Application.find({ candidateId }).populate("jobId");
     const sanitized = apps.map(app => ({
       _id: app._id,
       jobId: app.jobId,
