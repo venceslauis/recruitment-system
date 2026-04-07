@@ -58,7 +58,10 @@ const CandidateHome: React.FC = () => {
              phone: prev.phone || data.phone || "",
              skills: prev.skills || data.skills || "",
              projects: prev.projects || data.projects || "",
-             internships: prev.internships || data.internships || ""
+             internships: prev.internships || data.internships || "",
+             experience: prev.experience || (data.experience ? String(data.experience) : ""),
+             cgpa: prev.cgpa || (data.cgpa ? String(data.cgpa) : ""),
+             degree: prev.degree || data.degree || ""
            }));
         } catch(err) {
            console.error("Resume parse failed", err);
