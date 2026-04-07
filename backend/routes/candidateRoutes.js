@@ -7,7 +7,7 @@ const crypto = require("crypto");
 const Job = require("../models/Job");
 const Application = require("../models/Application");
 const Candidate = require("../models/Candidate");
-const { extractText, extractResumeFeatures, extractCertificateFeatures } = require("../services/ocrService");
+const { extractText, extractResumeFeatures, extractCertificateFeatures, fuzzyNameMatch } = require("../services/ocrService");
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -42,7 +42,7 @@ router.post("/parse-resume", upload.single("resume"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ message: "No resume provided" });
     const text = await extractText(req.file.path);
-    const features = extractResumeFeatures(text);
+    const features = await extractResumeFeatures(text);
     // Don't delete file if we want to keep it, but since it's just for parsing...
     // Actually, we can keep it and candidate uploads it again on apply, or just clear it.
     // We will clean it up to save space.
@@ -58,7 +58,7 @@ router.post("/parse-certificate", upload.single("certificate"), async (req, res)
   try {
     if (!req.file) return res.status(400).json({ message: "No certificate provided" });
     const text = await extractText(req.file.path);
-    const features = extractCertificateFeatures(text);
+    const features = await extractCertificateFeatures(text);
     try { fs.unlinkSync(req.file.path); } catch(e){}
     res.json({ text, ...features });
   } catch (err) {
@@ -177,8 +177,10 @@ router.post(
          let verified = false;
          let score = 0;
 
-         // Check 1: Name match
-         const nameMatched = certName.trim().toLowerCase() === name.trim().toLowerCase();
+         // Check 1: Fuzzy Name Match (handles "Kavin S" = "Kavin Sathish")
+         const nameMatchScore = fuzzyNameMatch(certName, name);
+         const nameMatched = nameMatchScore >= 0.7; // 70% token similarity threshold
+         console.log(`Cert [${i}] name match: "${certName}" vs "${name}" → score: ${nameMatchScore.toFixed(2)}, matched: ${nameMatched}`);
          
          // Check 2: Semantic Similarity >= 0.5
          let semMatchScore = 0;

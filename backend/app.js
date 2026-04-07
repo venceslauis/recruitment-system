@@ -27,3 +27,12 @@ const PORT = process.env.PORT || 5001;
 app.listen(PORT,()=>{
 console.log(`Server running on port ${PORT}`);
 });
+
+// Prevent server from crashing on unhandled errors (e.g. gRPC rejections)
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason?.message || reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err.message);
+});

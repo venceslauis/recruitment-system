@@ -1,224 +1,339 @@
 const { DocumentProcessorServiceClient } = require('@google-cloud/documentai').v1;
+const { VertexAI } = require('@google-cloud/vertexai');
 const fs = require('fs');
 const path = require('path');
 
-// Extract properties from PREDICTION_ENDPOINT
+// ─── Document AI Setup ────────────────────────────────────────────────────────
 const endpoint = process.env.PREDICTION_ENDPOINT || "";
 const match = endpoint.match(/projects\/(\d+)\/locations\/([^\/]+)\/processors\/([a-zA-Z0-9]+)/);
 
-const projectId = process.env.PROJECT_ID || (match ? match[1] : "");
-const location = process.env.LOCATION || (match ? match[2] : "us");
-const processorId = process.env.PROCESSOR_ID || (match ? match[3] : "");
+const projectId = process.env.VERTEX_PROJECT_ID || (match ? match[1] : "");
+const docAiLocation = process.env.LOCATION || (match ? match[2] : "us");
+const processorId = match ? match[3] : "";
 
-// Initialize client
-let client = null;
+let docAiClient = null;
 try {
-  // Use Application Default Credentials directly (set via gcloud login)
-  client = new DocumentProcessorServiceClient();
+  docAiClient = new DocumentProcessorServiceClient();
 } catch (err) {
   console.warn("WARNING: Document AI client failed to initialize.");
 }
 
-// Main Document AI Function
+// ─── Vertex AI Setup ─────────────────────────────────────────────────────────
+const vertexLocation = process.env.VERTEX_LOCATION || "us-central1";
+
+// Try model names in priority order until one works
+const MODEL_FALLBACK_CHAIN = [
+  process.env.VERTEX_MODEL || "gemini-2.5-flash",
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-exp",
+  "gemini-1.5-flash-002",
+];
+
+let vertexAI = null;
+let geminiModel = null;
+try {
+  vertexAI = new VertexAI({ project: projectId, location: vertexLocation });
+  geminiModel = vertexAI.getGenerativeModel({ model: MODEL_FALLBACK_CHAIN[0] });
+  console.log(`Vertex AI ready [model: ${MODEL_FALLBACK_CHAIN[0]}], location=${vertexLocation}`);
+} catch (err) {
+  console.warn("WARNING: Vertex AI client failed to initialize:", err.message);
+}
+
+// ─── Helper: Detect MIME type ─────────────────────────────────────────────────
+function getMimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case '.pdf':  return 'application/pdf';
+    case '.png':  return 'image/png';
+    case '.jpg':
+    case '.jpeg': return 'image/jpeg';
+    default:      return 'application/pdf';
+  }
+}
+
+// ─── Stage 1: Document AI OCR ─────────────────────────────────────────────────
 async function processDocument(filePath) {
-  if (!client) {
-    return { success: false, error: "Google Cloud credentials missing or invalid. Check GOOGLE_APPLICATION_CREDENTIALS.", text: "" };
+  if (!docAiClient) {
+    return { success: false, error: "Document AI credentials missing.", text: "" };
   }
 
   try {
     const file = fs.readFileSync(filePath);
-    const name = `projects/${projectId}/locations/${location}/processors/${processorId}`;
+    const name = `projects/${projectId}/locations/${docAiLocation}/processors/${processorId}`;
     console.log("🚀 Sending document to Document AI...");
     console.log("Processor Path:", name);
 
-    const request = {
+    const [result] = await docAiClient.processDocument({
       name,
       rawDocument: {
         content: file.toString('base64'),
         mimeType: getMimeType(filePath),
       },
-    };
+    });
 
-    const [result] = await client.processDocument(request);
-    const document = result.document;
-    const text = document.text;
-
+    const text = result.document.text;
     console.log("✅ OCR Success");
     console.log(`📝 Extracted length: ${text.length}`);
 
-    const pages = document.pages ? document.pages.map((page) => ({
-      pageNumber: page.pageNumber,
-      text: extractPageText(document, page),
-    })) : [];
-
-    return { success: true, text, pages };
-
+    return { success: true, text };
   } catch (error) {
-    console.error('OCR Error:', error);
+    console.error('OCR Error:', error.message);
     return { success: false, error: error.message, text: "" };
   }
 }
 
-// Helper: Extract text per page
-function extractPageText(document, page) {
-  let pageText = '';
-  if (!page.blocks) return '';
-
-  page.blocks.forEach((block) => {
-    block.layout.textAnchor.textSegments.forEach((segment) => {
-      const start = segment.startIndex || 0;
-      const end = segment.endIndex;
-      pageText += document.text.substring(start, end);
-    });
-  });
-
-  return pageText;
-}
-
-// Helper: Detect MIME type
-function getMimeType(filePath) {
-  const ext = path.extname(filePath).toLowerCase();
-  switch (ext) {
-    case '.pdf':
-      return 'application/pdf';
-    case '.png':
-      return 'image/png';
-    case '.jpg':
-    case '.jpeg':
-      return 'image/jpeg';
-    default:
-      // Fallback for docx or other formats if needed, or default generic
-      return 'application/pdf'; 
+// ─── Stage 2: Privacy-Safe PII Extraction (LOCAL — never leaves server) ───────
+function extractPIILocally(text) {
+  const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/i);
+  const phoneRawMatch = text.match(/(?:\+?(\d{1,3})[\s\-]?)?(\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{4})/);
+  let phone = "";
+  if (phoneRawMatch) {
+    // Strip all non-digits, then take last 10 digits (removes country code like +91)
+    const digits = phoneRawMatch[0].replace(/\D/g, "");
+    phone = digits.slice(-10);
+    if (phone.length !== 10) phone = ""; // Discard if not exactly 10 digits
   }
-}
+  const cgpaMatch  = text.match(/(?:cgpa|gpa|cpi)[\s:\-]*([0-9]{1,2}(?:\.[0-9]{1,2})?)/i);
+  const expMatch   = text.match(/([0-9]+(?:\.[0-9]+)?)\+?\s*years?(?:\s*of)?\s*experience/i);
+  const degreeMatch= text.match(/(b\.?tech|b\.?e\.?|b\.?sc|m\.?tech|m\.?sc|bca|mca|bba|mba|ph\.?d|bachelor(?:'s)?|master(?:'s)?)/i);
 
-// --- Adapters for existing architecture ---
-
-// Adapter function to maintain compatibility with your existing candidateRoutes
-async function extractText(filePath) {
-  const result = await processDocument(filePath);
-  if (!result.success) {
-    throw new Error(result.error);
-  }
-  return result.text;
-}
-
-// Keep existing heuristic extractors
-function extractResumeFeatures(text) {
-  // 1. Regex extractions for standard entities
-  const emailRegex = /[a-zA-Z0-9._%+-]+(?:\[at\]|@)[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/i;
-  const phoneRegex = /(?:\+?\d{1,3}[\s-]?)?(?:\(?\d{3}\)?[\s-]?)?\d{3}[\s-]?\d{4}/;
-  const cgpaRegex = /(?:cgpa|gpa|cpi)[\s\:\-]*([0-9]{1,2}(?:\.[0-9]{1,2})?)/i;
-  const expRegex = /([0-9]+(?:\.[0-9]+)?)\+?\s*years?(?:\s*of)?\s*experience/i;
-  const degreeRegex = /(b\.?tech|b\.?e\.?|b\.?sc|m\.?tech|m\.?sc|bca|mca|bba|mba|ph\.?d|bachelor(?:'s)?|master(?:'s)?)/i;
-
-  const emailMatch = text.match(emailRegex);
-  const phoneMatch = text.match(phoneRegex);
-  const cgpaMatch = text.match(cgpaRegex);
-  const expMatch = text.match(expRegex);
-  const degreeMatch = text.match(degreeRegex);
-
-  // Split lines for section parsing
+  // Name heuristic: first short line with no digits/email
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-
-  // Heuristic: Name is typically one of the first 3 lines and doesn't contain heavy punctuation
   let name = "";
-  for (let i = 0; i < Math.min(3, lines.length); i++) {
-     if (lines[i].split(' ').length <= 4 && !lines[i].includes('@') && !/\d/.test(lines[i])) {
-        name = lines[i];
-        break;
-     }
+  for (let i = 0; i < Math.min(4, lines.length); i++) {
+    if (lines[i].split(' ').length <= 5 && !lines[i].includes('@') && !/\d/.test(lines[i])) {
+      name = lines[i].replace(/[^a-zA-Z\s]/g, "").trim();
+      if (name.length > 2) break;
+    }
   }
 
-  const sections = {
-    skills: ["skills", "technical skills", "core competencies", "technologies"],
-    projects: ["projects", "personal projects", "academic projects"],
-    internships: ["internships", "experience", "work experience", "employment"],
-    education: ["education", "academic background"],
-    summary: ["summary", "profile", "about", "objective", "professional summary"],
-    tools: ["tools", "frameworks", "software"]
+  return {
+    name,
+    email:      emailMatch  ? emailMatch[0]            : "",
+    phone,
+    cgpa:       cgpaMatch   ? parseFloat(cgpaMatch[1])  : "",
+    experience: expMatch    ? parseFloat(expMatch[1])   : "",
+    degree:     degreeMatch ? degreeMatch[0]             : "",
   };
+}
 
-  const getSectionContent = (keywordsArray) => {
-    let inSection = false;
-    let sectionLines = [];
-    
+// ─── Stage 3: Anonymize text before sending to Vertex AI ─────────────────────
+function anonymizeText(text, pii) {
+  let anon = text;
+  if (pii.email) anon = anon.replace(new RegExp(pii.email.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '[EMAIL]');
+  if (pii.phone) anon = anon.replace(new RegExp(pii.phone.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '[PHONE]');
+  if (pii.name && pii.name.length > 2) anon = anon.replace(new RegExp(pii.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), '[CANDIDATE]');
+  return anon;
+}
+
+// ─── Stage 4: Vertex AI — Structured extraction with model fallback ──────────
+async function extractWithVertexAI(anonymizedText) {
+  if (!vertexAI) {
+    console.warn("Vertex AI unavailable — falling back to heuristics.");
+    return null;
+  }
+
+  const prompt = `You are a resume parser. Extract structured information from this resume text.
+Return ONLY a valid JSON object with exactly these keys:
+{
+  "skills": "comma-separated list of technical skills only (no bullets, no summaries)",
+  "projects": "brief list of project titles/descriptions, one per line",
+  "internships": "brief list of internships/work experience, one per line"
+}
+
+Rules:
+- skills: Only include actual technical skills (languages, tools, frameworks). No sentences.
+- Remove ALL bullet points (•, -, *, etc.)
+- Do NOT include summaries or objectives in any field
+- If a field has no data, return an empty string ""
+- Return ONLY the JSON, no markdown, no explanation
+
+Resume text:
+${anonymizedText.slice(0, 3000)}`;
+
+  // Try each model in the fallback chain until one succeeds
+  for (const modelName of MODEL_FALLBACK_CHAIN) {
+    try {
+      console.log(`🧠 Sending anonymized text to Vertex AI [model: ${modelName}]...`);
+      const model = vertexAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent(prompt);
+      const responseText = result.response.candidates[0].content.parts[0].text.trim();
+      const cleaned = responseText.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(cleaned);
+      console.log(`✅ Vertex AI extraction complete [model: ${modelName}]`);
+      return parsed;
+    } catch (err) {
+      if (err.message && err.message.includes("404")) {
+        console.warn(`Model '${modelName}' not available, trying next...`);
+        continue;
+      }
+      console.error("Vertex AI parse error:", err.message);
+      return null;
+    }
+  }
+
+  console.warn("All Vertex AI models exhausted — falling back to heuristics.");
+  return null;
+}
+
+// ─── Heuristic fallback (if Vertex AI unavailable) ───────────────────────────
+function heuristicExtract(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const allSectionKws = ["skills","technical skills","core competencies","technologies",
+    "projects","personal projects","academic projects","internships","experience",
+    "work experience","employment","education","academic background","summary",
+    "profile","about","objective","professional summary","tools","frameworks","software",
+    "certifications","achievements","awards"];
+
+  const getSectionContent = (keywords) => {
+    let inSection = false, sectionLines = [];
     for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim().toLowerCase();
-        
-        // Check if we enter the target section
-        const startsSection = keywordsArray.some(kw => line === kw || line.startsWith(kw + ":"));
-        if (startsSection) {
-            inSection = true;
-            continue;
-        }
-        
-        if (inSection) {
-            // Check if we hit a new section
-            const isAnyOtherSection = Object.values(sections).flat().some(kw => line === kw || line.startsWith(kw + ":"));
-            if (isAnyOtherSection) break;
-            
-            sectionLines.push(lines[i]);
-        }
+      const line = lines[i].toLowerCase().trim();
+      if (keywords.some(kw => line === kw || line.startsWith(kw + ":"))) { inSection = true; continue; }
+      if (inSection) {
+        if (allSectionKws.some(kw => line === kw || line.startsWith(kw + ":"))) break;
+        sectionLines.push(lines[i]);
+      }
     }
     return sectionLines;
   };
 
-  const skillsBlock = getSectionContent(sections.skills);
-  const projectsBlock = getSectionContent(sections.projects);
-  const internshipsBlock = getSectionContent(sections.internships);
-
-  // Cleaner utility for bullet points, odd spacings, and standalone weird commas
-  const sanitize = (text) => {
-      if (!text) return "";
-      return text
-        .replace(/[•●▪\-*\u2022\u25CF\u25AA]/g, ' ') // Remove various bullet points
-        .replace(/\s+/g, ' ')  // Collapse multiple spaces
-        .replace(/ ,/g, ',')   // Fix spaces before commas
-        .replace(/^[, ]+/, '') // Remove leading commas/spaces
-        .replace(/[, ]+$/, '') // Remove trailing commas/spaces
-        .replace(/,+/g, ',')   // Remove duplicate commas
-        .trim();
-  };
+  const sanitize = (t) => t
+    .replace(/[•●▪\-*\u2022\u25CF\u25AA]/g, ' ')
+    .replace(/\s+/g, ' ').replace(/ ,/g, ',')
+    .replace(/^[, ]+/, '').replace(/[, ]+$/, '')
+    .replace(/,+/g, ',').trim();
 
   return {
-    name: name.replace(/[^a-zA-Z\s]/g, "").trim(),
-    email: emailMatch ? emailMatch[0].replace("[at]", "@") : "",
-    phone: phoneMatch ? phoneMatch[0] : "",
-    cgpa: cgpaMatch ? parseFloat(cgpaMatch[1]) : "",
-    experience: expMatch ? parseFloat(expMatch[1]) : "",
-    degree: degreeMatch ? degreeMatch[0] : "",
-    skills: sanitize(skillsBlock.join(", ")).slice(0, 1000), // Prevent infinite blocks
-    projects: sanitize(projectsBlock.join("\n")).slice(0, 1000),
-    internships: sanitize(internshipsBlock.join("\n")).slice(0, 1000)
+    skills:      sanitize(getSectionContent(["skills","technical skills","core competencies","technologies"]).join(", ")),
+    projects:    sanitize(getSectionContent(["projects","personal projects","academic projects"]).join("\n")),
+    internships: sanitize(getSectionContent(["internships","experience","work experience","employment"]).join("\n")),
   };
 }
 
-function extractCertificateFeatures(text) {
-   const lowerText = text.toLowerCase();
-   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-   
-   let name = "";
-   const nameTriggers = ["awarded to", "presented to", "certifies that", "this certificate is given to", "successfully completed"];
-   
-   for (let i = 0; i < lines.length; i++) {
-      const lineLower = lines[i].toLowerCase();
-      if (nameTriggers.some(t => lineLower.includes(t))) {
-         if (i + 1 < lines.length) {
-            name = lines[i+1];
-         }
-         break;
-      }
-   }
-   
-   const title = lines.length > 0 ? lines[0] + (lines.length > 1 ? " " + lines[1] : "") : "";
-
-   return { name, title };
+// ─── Main Public Interface ────────────────────────────────────────────────────
+async function extractText(filePath) {
+  const result = await processDocument(filePath);
+  if (!result.success) throw new Error(result.error);
+  return result.text;
 }
 
-module.exports = { 
-  extractText, 
-  extractResumeFeatures, 
-  extractCertificateFeatures,
-  processDocument 
-};
+async function extractResumeFeatures(text) {
+  // Stage 1: Extract PII locally (never sent externally)
+  const pii = extractPIILocally(text);
+
+  // Stage 2: Anonymize the text
+  const anonymized = anonymizeText(text, pii);
+
+  // Stage 3: Try Vertex AI for clean structured extraction
+  let aiExtracted = await extractWithVertexAI(anonymized);
+
+  // Stage 4: Fallback to heuristics if Vertex AI failed
+  if (!aiExtracted) {
+    aiExtracted = heuristicExtract(text);
+  }
+
+  // Combine: PII from local extraction + content from Vertex AI
+  return {
+    name:        pii.name,
+    email:       pii.email,
+    phone:       pii.phone,
+    cgpa:        pii.cgpa,
+    experience:  pii.experience,
+    degree:      pii.degree,
+    skills:      (aiExtracted.skills || "").slice(0, 1000),
+    projects:    (aiExtracted.projects || "").slice(0, 1000),
+    internships: (aiExtracted.internships || "").slice(0, 1000),
+  };
+}
+
+// ─── Fuzzy Name Matcher ───────────────────────────────────────────────────────
+// Returns a 0-1 similarity score between two names
+// Handles: abbreviations ("Kavin S" vs "Kavin Sathish"), case, extra spaces
+function fuzzyNameMatch(nameA, nameB) {
+  if (!nameA || !nameB) return 0;
+
+  const normalize = (s) => s.toLowerCase().trim().replace(/[^a-z\s]/g, "").replace(/\s+/g, " ");
+  const a = normalize(nameA);
+  const b = normalize(nameB);
+
+  if (a === b) return 1.0;
+
+  const tokensA = a.split(" ");
+  const tokensB = b.split(" ");
+
+  // Check if all tokens of shorter name exist in longer (handles abbreviations)
+  const shorter = tokensA.length <= tokensB.length ? tokensA : tokensB;
+  const longer  = tokensA.length <= tokensB.length ? tokensB : tokensA;
+
+  // Match: first name must match, remaining tokens checked by initial or full match
+  let matchCount = 0;
+  for (const token of shorter) {
+    const found = longer.some(t => t === token || t.startsWith(token) || token.startsWith(t[0]));
+    if (found) matchCount++;
+  }
+
+  return matchCount / shorter.length;
+}
+
+// ─── Certificate Feature Extractor (Vertex AI + Heuristic fallback) ───────────
+async function extractCertificateFeatures(text) {
+  // First try Vertex AI for accurate structured extraction
+  if (vertexAI) {
+    const prompt = `You are a certificate parser. Extract structured fields from this certificate text.
+Return ONLY a valid JSON object with exactly these keys:
+{
+  "recipientName": "full name of the person who received the certificate",
+  "certificateTitle": "title or name of the course/achievement/program",
+  "issuingOrganization": "organization or institution that issued the certificate",
+  "completionDate": "date of completion or issue (as string, empty if not found)"
+}
+
+Rules:
+- recipientName: The actual person's name — look for phrases like 'awarded to', 'certifies that', 'presented to', 'this is to certify', 'completed by'
+- certificateTitle: The course or achievement name — usually the most prominent heading
+- Return ONLY the JSON, no markdown, no explanation
+- If a field is not found, use an empty string ""
+
+Certificate text:
+${text.slice(0, 2000)}`;
+
+    for (const modelName of MODEL_FALLBACK_CHAIN) {
+      try {
+        const model = vertexAI.getGenerativeModel({ model: modelName });
+        const result = await model.generateContent(prompt);
+        const responseText = result.response.candidates[0].content.parts[0].text.trim();
+        const cleaned = responseText.replace(/```json|```/g, "").trim();
+        const parsed = JSON.parse(cleaned);
+        console.log(`✅ Certificate parsed by Vertex AI [model: ${modelName}]`);
+        return {
+          name:                parsed.recipientName || "",
+          title:               parsed.certificateTitle || "",
+          issuingOrganization: parsed.issuingOrganization || "",
+          completionDate:      parsed.completionDate || "",
+          parsedBy:            "vertex-ai"
+        };
+      } catch (err) {
+        if (err.message && err.message.includes("404")) { continue; }
+        console.error("Certificate Vertex AI error:", err.message);
+        break;
+      }
+    }
+  }
+
+  // Heuristic fallback
+  console.warn("Certificate falling back to heuristic extraction.");
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  let name = "";
+  const nameTriggers = ["awarded to","presented to","certifies that","this certificate is given to","successfully completed","completed by","this is to certify"];
+  for (let i = 0; i < lines.length; i++) {
+    if (nameTriggers.some(t => lines[i].toLowerCase().includes(t))) {
+      if (i + 1 < lines.length) name = lines[i + 1];
+      break;
+    }
+  }
+  const title = lines.length > 0 ? lines[0] + (lines.length > 1 ? " " + lines[1] : "") : "";
+  return { name, title, issuingOrganization: "", completionDate: "", parsedBy: "heuristic" };
+}
+
+module.exports = { extractText, extractResumeFeatures, extractCertificateFeatures, processDocument, fuzzyNameMatch };
