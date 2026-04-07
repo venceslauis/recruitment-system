@@ -9,11 +9,11 @@ CORS(app)
 # Load fine-tuned model if available, otherwise fall back to pre-trained
 fine_tuned_path = os.path.join(os.path.dirname(__file__), 'fine_tuned_sbert')
 if os.path.exists(fine_tuned_path):
-    print(f"✅ Loading fine-tuned SBERT model from '{fine_tuned_path}'")
+    print(f"Loading fine-tuned SBERT model from '{fine_tuned_path}'")
     model = SentenceTransformer(fine_tuned_path)
 else:
-    print("⚠️  Fine-tuned model not found. Using pre-trained 'all-MiniLM-L6-v2'")
-    print("   Run 'python train.py' to fine-tune the model for better accuracy.")
+    print("Fine-tuned model not found. Using pre-trained 'all-MiniLM-L6-v2'")
+    print("Run 'python train.py' to fine-tune the model for better accuracy.")
     model = SentenceTransformer('all-MiniLM-L6-v2')
 
 @app.route('/match', methods=['POST'])

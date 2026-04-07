@@ -58,6 +58,13 @@ const Applicants: React.FC = () => {
                 <div className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500 drop-shadow-lg">
                   {Math.round(app.matchScore)} <span className="text-base text-gray-400">Score</span>
                 </div>
+                {app.scoreDetails && (
+                   <div className="text-xs text-gray-400 mt-1 flex gap-2">
+                      <span>Skills: {Math.round(app.scoreDetails.skillScore || 0)}</span>
+                      <span>| Integ: {Math.round(app.scoreDetails.integrityScore || 0)}</span>
+                      <span>| Certs: {Math.round(app.scoreDetails.certificateBonus || 0)}</span>
+                   </div>
+                )}
                 <div className="mt-2 text-xs font-mono text-gray-500 bg-black/30 px-3 py-1 rounded-full border border-white/5 truncate max-w-[200px]" title={app.zkpProofHash}>
                   Proof: {app.zkpProofHash?.substring(0, 12)}...
                 </div>

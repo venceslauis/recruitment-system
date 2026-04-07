@@ -27,6 +27,10 @@ const JobSchema = new mongoose.Schema({
   // SBERT Semantic match criteria: skill + weight
   skillCriteria: [SkillCriteriaSchema],
 
+  // Certificates criteria
+  certificateWeight: { type: Number, default: 0 },
+  expectedCertificates: { type: Number, default: 0 },
+
   // AI Integrity questions
   integrityCheck: {
     enabled: { type: Boolean, default: false },

@@ -29,7 +29,10 @@ const PostJob: React.FC = () => {
   const [integrityQuestions, setIntegrityQuestions] = useState<string[]>([]);
   const [currentQuestion, setCurrentQuestion] = useState("");
 
-  const totalCurrentWeight = skills.reduce((sum, s) => sum + s.weight, 0) + (integrityEnabled ? integrityWeight : 0);
+  const [certificateWeight, setCertificateWeight] = useState(0);
+  const [expectedCertificates, setExpectedCertificates] = useState(0);
+
+  const totalCurrentWeight = skills.reduce((sum, s) => sum + s.weight, 0) + (integrityEnabled ? integrityWeight : 0) + certificateWeight;
 
   const addSkill = () => {
     if (currentSkill && currentWeight > 0) {
@@ -61,6 +64,8 @@ const PostJob: React.FC = () => {
         title, company, description,
         eligibility,
         skillCriteria: skills,
+        certificateWeight,
+        expectedCertificates,
         integrityCheck: {
           enabled: integrityEnabled,
           weight: integrityWeight,
@@ -138,12 +143,12 @@ const PostJob: React.FC = () => {
 
           <div className="bg-white/5 p-6 rounded-2xl border border-white/10">
             <h3 className="text-xl font-semibold mb-2 text-indigo-300 flex justify-between">
-              <span>Skill & Integrity Weights</span>
+              <span>Skill, Integrity & Certificate Weights</span>
               <span className={totalCurrentWeight === 100 ? "text-green-400" : "text-yellow-400"}>
                 Total: {totalCurrentWeight}/100
               </span>
             </h3>
-            <p className="text-sm text-gray-400 mb-4">You must distribute exactly 100 points among skills and integrity checks.</p>
+            <p className="text-sm text-gray-400 mb-4">You must distribute exactly 100 points among skills, certificates, and integrity checks.</p>
             
             <div className="flex gap-4 mb-4">
               <input placeholder="Skill Name (e.g. React)" value={currentSkill} onChange={e => setCurrentSkill(e.target.value)} className="flex-1 bg-black/20 rounded-xl p-3 border border-white/10" />
@@ -181,6 +186,20 @@ const PostJob: React.FC = () => {
                   </ul>
                 </div>
               )}
+            </div>
+
+            <div className="border-t border-white/10 pt-4 mt-4">
+              <h4 className="font-semibold text-gray-200 mb-4">Certifications / Proofs</h4>
+              <div className="flex gap-4">
+                <div>
+                  <label className="block text-sm mb-1 text-gray-400">Certificates Weight</label>
+                  <input type="number" value={certificateWeight || ""} onChange={e => setCertificateWeight(+e.target.value)} className="w-32 bg-black/20 rounded-xl p-2 border border-white/10" />
+                </div>
+                <div>
+                  <label className="block text-sm mb-1 text-gray-400">Expected No. of Verified Certificates</label>
+                  <input type="number" value={expectedCertificates || ""} onChange={e => setExpectedCertificates(+e.target.value)} className="w-32 bg-black/20 rounded-xl p-2 border border-white/10" />
+                </div>
+              </div>
             </div>
           </div>
 

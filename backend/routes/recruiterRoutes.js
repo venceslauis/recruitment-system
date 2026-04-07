@@ -11,7 +11,7 @@ router.post("/postJob", async (req, res) => {
 
   try {
 
-    const { title, company, description, eligibility, skillCriteria, integrityCheck, recruiterId } = req.body;
+    const { title, company, description, eligibility, skillCriteria, integrityCheck, certificateWeight, expectedCertificates, recruiterId } = req.body;
 
     // Validate weights total to 100 or 1.0 depending on scale used. Assume scale is 100 here.
     let totalWeight = 0;
@@ -21,9 +21,12 @@ router.post("/postJob", async (req, res) => {
     if (integrityCheck && integrityCheck.enabled) {
       totalWeight += integrityCheck.weight || 0;
     }
+    if (certificateWeight) {
+      totalWeight += certificateWeight;
+    }
 
     if (totalWeight !== 100 && totalWeight !== 1) {
-       return res.status(400).json({ error: "Total weightage (skills + integrity) must equal 100 or 1.0" });
+       return res.status(400).json({ error: "Total weightage (skills + integrity + certificates) must equal 100 or 1.0" });
     }
 
     const job = new Job({
@@ -32,6 +35,8 @@ router.post("/postJob", async (req, res) => {
       description,
       eligibility,
       skillCriteria,
+      certificateWeight,
+      expectedCertificates,
       integrityCheck,
       recruiterId
     });

@@ -19,6 +19,16 @@ const ApplicationSchema = new mongoose.Schema({
 
   // Skills extracted from uploaded resume
   resumeSkills: [String],
+  projects: [String],
+  internships: [String],
+
+  // Processed certificates
+  certificates: [{
+    name: String,
+    title: String,
+    score: Number,
+    verified: Boolean
+  }],
 
   // Path to the uploaded resume file
   resumePath: String,
