@@ -1,0 +1,40 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_28-de0778438a7a1d32ecf6cd86c8dea5ee2b491f5e",
+  "solcVersion": "0.8.28",
+  "solcLongVersion": "0.8.28+commit.7893614a",
+  "compilerType": "solc",
+  "userSourceNameMap": {
+    "contracts/CertificateRegistry.sol": "project/contracts/CertificateRegistry.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "cancun",
+      "optimizer": {
+        "enabled": true,
+        "runs": 200
+      },
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode",
+            "evm.deployedBytecode",
+            "evm.methodIdentifiers",
+            "metadata"
+          ]
+        }
+      },
+      "remappings": []
+    },
+    "sources": {
+      "project/contracts/CertificateRegistry.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.28;\n\n/**\n * @title CertificateRegistry\n * @notice Tamper-proof on-chain registry for job-applicant certificates.\n *         Only the contract owner (deployer) can register certificates.\n *         Anyone can query whether a certificate hash has been registered.\n *\n * How it works:\n *  1. Backend hashes the uploaded PDF/image with SHA-256 (hex string → bytes32).\n *  2. Backend calls registerCertificate(bytes32 hash) on this contract.\n *  3. The hash is stored on-chain permanently — immutable and publicly verifiable.\n *  4. isCertificateVerified(hash) returns true/false for any subsequent check.\n */\ncontract CertificateRegistry {\n\n    /* ─────────────────────────────────────────\n       State\n    ───────────────────────────────────────── */\n\n    address public owner;\n\n    // certHash → registered?\n    mapping(bytes32 => bool) private _verified;\n\n    // certHash → who registered it (candidateId as a string label)\n    mapping(bytes32 => string) private _registeredBy;\n\n    // certHash → block timestamp of registration\n    mapping(bytes32 => uint256) private _registeredAt;\n\n    // Running count of all registered certificates\n    uint256 public totalCertificates;\n\n    /* ─────────────────────────────────────────\n       Events\n    ───────────────────────────────────────── */\n\n    event CertificateRegistered(\n        bytes32 indexed certHash,\n        string  candidateId,\n        uint256 timestamp\n    );\n\n    /* ─────────────────────────────────────────\n       Modifiers\n    ───────────────────────────────────────── */\n\n    modifier onlyOwner() {\n        require(msg.sender == owner, \"CertificateRegistry: caller is not owner\");\n        _;\n    }\n\n    /* ─────────────────────────────────────────\n       Constructor\n    ───────────────────────────────────────── */\n\n    constructor() {\n        owner = msg.sender;\n    }\n\n    /* ─────────────────────────────────────────\n       Write Functions\n    ───────────────────────────────────────── */\n\n    /**\n     * @notice Register a certificate hash on-chain.\n     * @param certHash   SHA-256 hash of the certificate file (as bytes32).\n     * @param candidateId MongoDB ObjectId of the candidate (stored as label only).\n     *\n     * Only the deployer (owner) can call this.\n     * Reverts if the certificate is already registered.\n     */\n    function registerCertificate(bytes32 certHash, string calldata candidateId)\n        external\n        onlyOwner\n    {\n        require(!_verified[certHash], \"CertificateRegistry: already registered\");\n\n        _verified[certHash]      = true;\n        _registeredBy[certHash]  = candidateId;\n        _registeredAt[certHash]  = block.timestamp;\n        totalCertificates++;\n\n        emit CertificateRegistered(certHash, candidateId, block.timestamp);\n    }\n\n    /* ─────────────────────────────────────────\n       Read Functions\n    ───────────────────────────────────────── */\n\n    /**\n     * @notice Check if a certificate hash is verified on-chain.\n     * @param certHash  SHA-256 hash of the certificate (as bytes32).\n     */\n    function isCertificateVerified(bytes32 certHash)\n        external\n        view\n        returns (bool)\n    {\n        return _verified[certHash];\n    }\n\n    /**\n     * @notice Get full metadata of a registered certificate.\n     * @param certHash  SHA-256 hash (bytes32).\n     * @return verified     true if on chain\n     * @return candidateId  label of who submitted it\n     * @return timestamp    Unix timestamp of when it was registered\n     */\n    function getCertificateInfo(bytes32 certHash)\n        external\n        view\n        returns (\n            bool    verified,\n            string  memory candidateId,\n            uint256 timestamp\n        )\n    {\n        verified    = _verified[certHash];\n        candidateId = _registeredBy[certHash];\n        timestamp   = _registeredAt[certHash];\n    }\n\n    /* ─────────────────────────────────────────\n       Owner Management\n    ───────────────────────────────────────── */\n\n    /**\n     * @notice Transfer ownership to a new address.\n     */\n    function transferOwnership(address newOwner) external onlyOwner {\n        require(newOwner != address(0), \"CertificateRegistry: zero address\");\n        owner = newOwner;\n    }\n}\n"
+      }
+    }
+  }
+}

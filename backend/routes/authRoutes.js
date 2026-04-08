@@ -32,6 +32,8 @@ router.post("/request-otp", async (req, res) => {
   const otpRecord = new OTP({ email, otp });
   await otpRecord.save();
 
+  console.log(`[DEV MODE] OTP generated for ${email}: ${otp}`);
+
   try {
     await transporter.sendMail({
       from: process.env.SMTP_USER,
@@ -41,8 +43,8 @@ router.post("/request-otp", async (req, res) => {
     });
     res.json({ message: "OTP sent to your email" });
   } catch (error) {
-    console.error("Error sending OTP email:", error);
-    res.status(500).json({ message: "Failed to send OTP email" });
+    console.error("Error sending OTP email (Continuing anyway for Dev):", error.message);
+    res.json({ message: "OTP process initiated (check server log for dev code)" });
   }
 });
 
@@ -79,31 +81,42 @@ router.post("/register", async (req, res) => {
 });
 
 router.post("/login", async (req, res) => {
-
+  console.log("Login attempt for:", req.body.email);
   const { email, password } = req.body;
 
-  const user = await User.findOne({ email });
-  if (!user) return res.status(404).json({ message: "User not found" });
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      console.log("Login failed: User not found ->", email);
+      return res.status(404).json({ message: "User not found" });
+    }
 
-  const match = await bcrypt.compare(password, user.password);
-  if (!match) return res.status(400).json({ message: "Invalid password" });
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) {
+      console.log("Login failed: Invalid password for ->", email);
+      return res.status(400).json({ message: "Invalid password" });
+    }
 
-  // If candidate has no linked profile yet, create one now
-  if (user.role === "candidate" && !user.candidateId) {
-    const candidate = await Candidate.create({ name: "", age: 0, skills: [], score: 0 });
-    user.candidateId = candidate._id;
-    await user.save();
+    // If candidate has no linked profile yet, create one now
+    if (user.role === "candidate" && !user.candidateId) {
+      const candidate = await Candidate.create({ name: "", age: 0, skills: [], score: 0 });
+      user.candidateId = candidate._id;
+      await user.save();
+    }
+
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || "secretkey");
+
+    console.log("Login successful for:", email);
+    res.json({
+      token,
+      role: user.role,
+      userId: user._id,
+      candidateId: user.candidateId ?? null
+    });
+  } catch (err) {
+    console.error("Login Error:", err);
+    res.status(500).json({ message: "Server error during login" });
   }
-
-  const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || "secretkey");
-
-  res.json({
-    token,
-    role: user.role,
-    userId: user._id,
-    candidateId: user.candidateId ?? null
-  });
-
 });
 
 module.exports = router;

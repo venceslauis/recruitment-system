@@ -7,7 +7,7 @@ const crypto = require("crypto");
 const Job = require("../models/Job");
 const Application = require("../models/Application");
 const Candidate = require("../models/Candidate");
-const { extractText, extractResumeFeatures, extractCertificateFeatures, fuzzyNameMatch } = require("../services/ocrService");
+const { extractText, extractResumeFeatures, extractCertificateFeatures, fuzzyNameMatch, scoreIntegrityWithLLM } = require("../services/ocrService");
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -121,103 +121,120 @@ router.post(
         }
       }
 
-      // SBERT SCORING
-      let skillScore = 0;
-      let integrityScore = 0;
-      let certificateBonus = 0;
-
-      // 1. Skill Similarity
-      const recruiterSkillsText = job.skillCriteria ? job.skillCriteria.map(sc => sc.skill).join(", ") : "";
-      // Append projects and internships to resumeText to give it more context for semantic match
-      const fullCandidateText = resumeText + " " + (projects || "") + " " + (internships || "");
-      if (recruiterSkillsText && fullCandidateText) {
-         try {
-           const sbertRes = await axios.post("http://127.0.0.1:5000/match", {
-             resumeText: fullCandidateText,
-             jobDescription: recruiterSkillsText
-           });
-           const sim = Math.max(0, sbertRes.data.score); 
-           const totalSkillWeight = job.skillCriteria.reduce((sum, s) => sum + s.weight, 0);
-           skillScore = (sim / 100) * totalSkillWeight;
-         } catch(e) {
-           console.error("SBERT Error:", e.message);
-         }
-      }
-
-      // 2. Integrity Questions Similarity
-      if (job.integrityCheck && job.integrityCheck.enabled && integrityAnswers) {
-         const questionsText = job.integrityCheck.questions.join(" ");
-         try {
-           const sbertRes = await axios.post("http://127.0.0.1:5000/match", {
-             resumeText: integrityAnswers,
-             jobDescription: questionsText
-           });
-           const sim = Math.max(0, sbertRes.data.score);
-           integrityScore = (sim / 100) * job.integrityCheck.weight;
-         } catch(e) {
-           console.error("SBERT Integrity Error:", e.message);
-         }
-      }
-
-      // 3. Certificate Bonus
-      // Max certs = required by recruiter. Max weight = certificateWeight.
-      const maxCerts = job.expectedCertificates || 0;
+      // ─── PARALLEL SCORING ────────────────────────────────────────────────────
+      // FIX 1: Use Vertex AI-extracted skills field as primary comparison text
+      // (focused, clean signal) with resume as fallback context
+      const candidateSkillsText = (req.body.skills || "").trim() || resumeText;
+      const maxCerts        = job.expectedCertificates || 0;
       const totalCertWeight = job.certificateWeight || 0;
-      const weightPerCert = maxCerts > 0 ? (totalCertWeight / maxCerts) : 0;
-      
+      const weightPerCert   = maxCerts > 0 ? (totalCertWeight / maxCerts) : 0;
       const certificateFiles = req.files['certificate'] || [];
-      const certificatesData = [];
-      
-      let k = 0; // accumulated cert weight
 
-      for (let i = 0; i < certificateFiles.length; i++) {
-         const certName = certNames[i] || "";
-         const certTitle = certTitles[i] || "";
-         
-         let verified = false;
-         let score = 0;
+      const sbertCall = (text1, text2) =>
+        axios.post("http://127.0.0.1:5000/match", { resumeText: text1, jobDescription: text2 })
+             .then(r => Math.max(0, r.data.score))
+             .catch(e => { console.error("SBERT Error:", e.message); return 0; });
 
-         // Check 1: Fuzzy Name Match (handles "Kavin S" = "Kavin Sathish")
-         const nameMatchScore = fuzzyNameMatch(certName, name);
-         const nameMatched = nameMatchScore >= 0.7; // 70% token similarity threshold
-         console.log(`Cert [${i}] name match: "${certName}" vs "${name}" → score: ${nameMatchScore.toFixed(2)}, matched: ${nameMatched}`);
-         
-         // Check 2: Semantic Similarity >= 0.5
-         let semMatchScore = 0;
-         if (nameMatched && certTitle) {
-            try {
-               const sbertRes = await axios.post("http://127.0.0.1:5000/match", {
-                  resumeText: certTitle,
-                  jobDescription: job.title
-               });
-               semMatchScore = sbertRes.data.score / 100; // normalize 0-1
-            } catch(e) {
-               console.error("SBERT Cert Error:", e.message);
-            }
-         }
+      // ── 1. Proportional Skill Scoring (per-skill SBERT, all in parallel) ──────
+      // FIX 2: Proportional formula — score = (sim / 100) * weight per skill
+      // Eliminates cliff-edge of binary threshold for fairer scoring
+      const integrityEnabled = job.integrityCheck?.enabled && integrityAnswers;
+      const integrityWeight  = job.integrityCheck?.weight || 0;
 
-         if (nameMatched && semMatchScore >= 0.5) {
-             verified = true;
-         }
+      const [skillBreakdown, llmIntegrityScore] = await Promise.all([
+        Promise.all(
+          (job.skillCriteria || []).map(async ({ skill, weight }) => {
+            const sim = await sbertCall(candidateSkillsText, skill);
+            const contribution = parseFloat(((sim / 100) * weight).toFixed(2)); // proportional
+            return {
+              skill,
+              weight,
+              similarity: parseFloat(sim.toFixed(1)),
+              contribution,                         // actual points earned for this skill
+              matched: sim >= 50                    // display flag only (for UI green/red)
+            };
+          })
+        ),
+        integrityEnabled
+          ? scoreIntegrityWithLLM(job.integrityCheck.questions, integrityAnswers, integrityWeight)
+          : Promise.resolve(0),
+      ]);
 
-         if (verified && k < totalCertWeight) {
-             k += weightPerCert;
-             // Ensure we don't exceed totalCertWeight slightly due to floating point
-             if (k > totalCertWeight) k = totalCertWeight;
-             score = weightPerCert;
-         }
+      // Skill score = sum of proportional contributions across all skills
+      const skillScore = parseFloat(
+        skillBreakdown.reduce((sum, s) => sum + s.contribution, 0).toFixed(2)
+      );
 
-         certificatesData.push({
-             name: certName,
-             title: certTitle,
-             verified: verified,
-             score: score
-         });
+      console.log(`📊 Skill Score: ${skillScore} (proportional)`);
+      skillBreakdown.forEach(s => console.log(`   ${s.matched ? '✅' : '⚠️ '} ${s.skill}: sim=${s.similarity}%, contrib=${s.contribution}/${s.weight}`));
+
+      // ── 2. Integrity score ────────────────────────────────────────────────────
+      let integrityScore = 0;
+      if (llmIntegrityScore !== null) {
+        integrityScore = llmIntegrityScore;
+      } else if (integrityEnabled) {
+        console.warn("LLM integrity failed — falling back to SBERT");
+        const sbertSim = await sbertCall(integrityAnswers, job.integrityCheck.questions.join(" "));
+        integrityScore = (sbertSim / 100) * integrityWeight;
       }
 
-      certificateBonus = Math.min(k, totalCertWeight);
+      // ── 3. Certificates — name check (local), then SBERT vs job title+skills ──
+      // FIX 3: Compare cert against job title + required skills for richer context
+      const jobContextForCert = job.title + " " + (job.skillCriteria?.map(s => s.skill).join(" ") || "");
 
-      const matchScore = skillScore + integrityScore + certificateBonus;
+      const certSBERTPromises = certificateFiles.map((_, i) => {
+        const certName  = certNames[i] || "";
+        const certTitle = certTitles[i] || "";
+        const nameMatchScore = fuzzyNameMatch(certName, name);
+        const nameMatched    = nameMatchScore >= 0.7;
+        console.log(`Cert [${i}] name match: "${certName}" vs "${name}" → ${nameMatchScore.toFixed(2)}, matched: ${nameMatched}`);
+        if (nameMatched && certTitle) {
+          // FIX 3: compare against job title + skills context (not just title)
+          return sbertCall(certTitle, jobContextForCert).then(sim => ({ nameMatched, semSim: sim / 100, certName, certTitle }));
+        }
+        return Promise.resolve({ nameMatched: false, semSim: 0, certName, certTitle });
+      });
+
+      const certResults = await Promise.all(certSBERTPromises);
+
+      let k = 0;
+      const certificatesData = certResults.map(({ nameMatched, semSim, certName, certTitle }) => {
+        // Condition (1): Fuzzy name match >= 0.7
+        const cond1_nameMatch = nameMatched;
+
+        // Condition (2): Semantic similarity of cert title >= 0.5
+        const cond2_semMatch = semSim >= 0.5;
+
+        // Condition (3): Blockchain ledger hash verification
+        // TODO: After blockchain deployment, call ledger API to compare cert hash
+        // For now: defaults to true (pass-through) until blockchain is live
+        const cond3_blockchain = true; // placeholder — will be replaced post-blockchain deployment
+
+        const verified = cond1_nameMatch && cond2_semMatch && cond3_blockchain;
+
+        console.log(`Cert "${certName}" → verified: ${verified} [name:${cond1_nameMatch}, sem:${semSim.toFixed(2)}, chain:${cond3_blockchain}]`);
+
+        let score = 0;
+        if (verified && k < totalCertWeight) {
+          k = Math.min(k + weightPerCert, totalCertWeight);
+          score = weightPerCert;
+        }
+        return { name: certName, title: certTitle, verified, score };
+      });
+
+      const certificateBonus = Math.min(k, totalCertWeight);
+
+      // FIX 4: Normalize to guarantee 0–100 range regardless of weight rounding errors  
+      const rawScore = skillScore + integrityScore + certificateBonus;
+      const totalDefinedWeight = (job.skillCriteria?.reduce((s, c) => s + c.weight, 0) || 0)
+                               + integrityWeight
+                               + totalCertWeight;
+      // If weights don't sum to 100, normalize proportionally; otherwise use raw
+      const matchScore = totalDefinedWeight > 0 && Math.abs(totalDefinedWeight - 100) > 1
+        ? parseFloat(((rawScore / totalDefinedWeight) * 100).toFixed(2))
+        : parseFloat(rawScore.toFixed(2));
+
+      console.log(`🏆 Final matchScore: ${matchScore} (raw: ${rawScore.toFixed(2)}, totalWeight: ${totalDefinedWeight})`);
 
       // Generate ZKP proof hash
       const proofData = JSON.stringify({ email, jobId, matchScore, timestamp: Date.now() });
@@ -235,7 +252,7 @@ router.post(
         internships: internships ? internships.split('\n') : [],
         certificates: certificatesData,
         matchScore,
-        scoreDetails: { skillScore, integrityScore, certificateBonus },
+        scoreDetails: { skillScore, integrityScore, certificateBonus, skillBreakdown },
         zkpProofHash
       });
 

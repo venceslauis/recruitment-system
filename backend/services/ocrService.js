@@ -2,6 +2,7 @@ const { DocumentProcessorServiceClient } = require('@google-cloud/documentai').v
 const { VertexAI } = require('@google-cloud/vertexai');
 const fs = require('fs');
 const path = require('path');
+const mammoth = require('mammoth');
 
 // ─── Document AI Setup ────────────────────────────────────────────────────────
 const endpoint = process.env.PREDICTION_ENDPOINT || "";
@@ -47,17 +48,35 @@ function getMimeType(filePath) {
     case '.png':  return 'image/png';
     case '.jpg':
     case '.jpeg': return 'image/jpeg';
+    case '.txt':  return 'text/plain';
+    case '.docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     default:      return 'application/pdf';
   }
 }
 
 // ─── Stage 1: Document AI OCR ─────────────────────────────────────────────────
 async function processDocument(filePath) {
-  if (!docAiClient) {
-    return { success: false, error: "Document AI credentials missing.", text: "" };
-  }
-
   try {
+    const mimeType = getMimeType(filePath);
+
+    // Fast-path: local parsing for .txt
+    if (mimeType === 'text/plain') {
+      console.log("📄 Reading plain text file locally...");
+      const text = fs.readFileSync(filePath, 'utf8');
+      return { success: true, text };
+    }
+
+    // Fast-path: local parsing for .docx using mammoth
+    if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+      console.log("📄 Extracting text from DOCX locally using mammoth...");
+      const result = await mammoth.extractRawText({ path: filePath });
+      return { success: true, text: result.value };
+    }
+
+    if (!docAiClient) {
+      return { success: false, error: "Document AI credentials missing.", text: "" };
+    }
+
     const file = fs.readFileSync(filePath);
     const name = `projects/${projectId}/locations/${docAiLocation}/processors/${processorId}`;
     console.log("🚀 Sending document to Document AI...");
@@ -126,6 +145,44 @@ function anonymizeText(text, pii) {
   return anon;
 }
 
+// ─── Helper: Invoke Vertex AI with Exponential Backoff + Model Fallback ──────
+async function invokeVertexAIWithRetry(prompt, retries = 3) {
+  if (!vertexAI) return null;
+
+  for (const modelName of MODEL_FALLBACK_CHAIN) {
+    let attempt = 0;
+    while (attempt < retries) {
+      try {
+        console.log(`🧠 Invoking Vertex AI [model: ${modelName}, attempt: ${attempt + 1}/${retries}]...`);
+        const model = vertexAI.getGenerativeModel({ model: modelName });
+        const result = await model.generateContent(prompt);
+        const responseText = result.response.candidates[0].content.parts[0].text.trim();
+        const cleaned = responseText.replace(/```json|```/g, "").trim();
+        return { parsed: JSON.parse(cleaned), modelName };
+      } catch (err) {
+        if (err.message && err.message.includes("404")) {
+          console.warn(`Model '${modelName}' not available (404), trying next model...`);
+          break; // Move to next model immediately
+        }
+
+        attempt++;
+        const isRateLimit = err.message && (err.message.includes("429") || err.message.includes("quota") || err.message.includes("rate limit"));
+
+        if (attempt >= retries || (!isRateLimit && attempt >= 1)) {
+          console.error(`Vertex AI error [model: ${modelName}]:`, err.message);
+          break; // Stop retrying this model on non-rate-limit errors or if exhausted
+        }
+
+        const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+        console.warn(`⏳ Vertex AI Rate Limit / Intermittent Error. Retrying in ${Math.round(delay)}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  return null;
+}
+
 // ─── Stage 4: Vertex AI — Structured extraction with model fallback ──────────
 async function extractWithVertexAI(anonymizedText) {
   if (!vertexAI) {
@@ -151,28 +208,13 @@ Rules:
 Resume text:
 ${anonymizedText.slice(0, 3000)}`;
 
-  // Try each model in the fallback chain until one succeeds
-  for (const modelName of MODEL_FALLBACK_CHAIN) {
-    try {
-      console.log(`🧠 Sending anonymized text to Vertex AI [model: ${modelName}]...`);
-      const model = vertexAI.getGenerativeModel({ model: modelName });
-      const result = await model.generateContent(prompt);
-      const responseText = result.response.candidates[0].content.parts[0].text.trim();
-      const cleaned = responseText.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(cleaned);
-      console.log(`✅ Vertex AI extraction complete [model: ${modelName}]`);
-      return parsed;
-    } catch (err) {
-      if (err.message && err.message.includes("404")) {
-        console.warn(`Model '${modelName}' not available, trying next...`);
-        continue;
-      }
-      console.error("Vertex AI parse error:", err.message);
-      return null;
-    }
+  const aiResult = await invokeVertexAIWithRetry(prompt);
+  if (aiResult && aiResult.parsed) {
+    console.log(`✅ Vertex AI extraction complete [model: ${aiResult.modelName}]`);
+    return aiResult.parsed;
   }
 
-  console.warn("All Vertex AI models exhausted — falling back to heuristics.");
+  console.warn("All Vertex AI models exhausted/failed — falling back to heuristics.");
   return null;
 }
 
@@ -298,26 +340,17 @@ Rules:
 Certificate text:
 ${text.slice(0, 2000)}`;
 
-    for (const modelName of MODEL_FALLBACK_CHAIN) {
-      try {
-        const model = vertexAI.getGenerativeModel({ model: modelName });
-        const result = await model.generateContent(prompt);
-        const responseText = result.response.candidates[0].content.parts[0].text.trim();
-        const cleaned = responseText.replace(/```json|```/g, "").trim();
-        const parsed = JSON.parse(cleaned);
-        console.log(`✅ Certificate parsed by Vertex AI [model: ${modelName}]`);
-        return {
-          name:                parsed.recipientName || "",
-          title:               parsed.certificateTitle || "",
-          issuingOrganization: parsed.issuingOrganization || "",
-          completionDate:      parsed.completionDate || "",
-          parsedBy:            "vertex-ai"
-        };
-      } catch (err) {
-        if (err.message && err.message.includes("404")) { continue; }
-        console.error("Certificate Vertex AI error:", err.message);
-        break;
-      }
+    const aiResult = await invokeVertexAIWithRetry(prompt);
+    if (aiResult && aiResult.parsed) {
+      const parsed = aiResult.parsed;
+      console.log(`✅ Certificate parsed by Vertex AI [model: ${aiResult.modelName}]`);
+      return {
+        name:                parsed.recipientName || "",
+        title:               parsed.certificateTitle || "",
+        issuingOrganization: parsed.issuingOrganization || "",
+        completionDate:      parsed.completionDate || "",
+        parsedBy:            "vertex-ai"
+      };
     }
   }
 
@@ -336,4 +369,62 @@ ${text.slice(0, 2000)}`;
   return { name, title, issuingOrganization: "", completionDate: "", parsedBy: "heuristic" };
 }
 
-module.exports = { extractText, extractResumeFeatures, extractCertificateFeatures, processDocument, fuzzyNameMatch };
+// ─── Vertex AI Integrity Scorer ───────────────────────────────────────────────
+// Uses LLM to judge the QUALITY and RELEVANCE of candidate answers,
+// not just semantic similarity. Returns a score 0–100.
+async function scoreIntegrityWithLLM(questions, candidateAnswers, integrityWeight) {
+  if (!vertexAI || !questions || !candidateAnswers) return null;
+
+  // Anonymize candidate answers before sending to Vertex AI
+  const safeAnswers = candidateAnswers
+    .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/gi, '[EMAIL]')
+    .replace(/(?:\+?\d{1,3}[\s\-]?)?\(?\d{3}\)?[\s\-]?\d{3}[\s\-]?\d{4}/g, '[PHONE]');
+
+  const questionsText = Array.isArray(questions) ? questions.join("\n") : questions;
+
+  const prompt = `You are an expert HR assessor evaluating a candidate's integrity and honesty.
+
+Evaluate the quality of the candidate's answers to the following integrity questions.
+Consider: relevance, thoughtfulness, honesty, specificity, and maturity of response.
+
+INTEGRITY QUESTIONS:
+${questionsText}
+
+CANDIDATE ANSWERS:
+${safeAnswers.slice(0, 1500)}
+
+Score the answers on a scale of 0 to 100 where:
+- 0–20: Irrelevant, too short, or evasive answers
+- 21–40: Vague answers with little substance
+- 41–60: Acceptable answers, somewhat relevant
+- 61–80: Good, thoughtful answers with specific examples
+- 81–100: Excellent, mature, honest and detailed answers
+
+Return ONLY a valid JSON object:
+{
+  "score": <number 0-100>,
+  "justification": "<one sentence reason>"
+}
+
+Return ONLY the JSON. No markdown. No extra text.`;
+
+  const aiResult = await invokeVertexAIWithRetry(prompt);
+  if (aiResult && aiResult.parsed) {
+    const parsed = aiResult.parsed;
+    const score = Math.min(100, Math.max(0, Number(parsed.score) || 0));
+    console.log(`🧠 Integrity LLM score: ${score}/100 — ${parsed.justification} [model: ${aiResult.modelName}]`);
+    return (score / 100) * integrityWeight;
+  }
+
+  console.warn("All LLM models failed for integrity — caller should fall back to SBERT.");
+  return null;
+}
+
+module.exports = {
+  extractText,
+  extractResumeFeatures,
+  extractCertificateFeatures,
+  processDocument,
+  fuzzyNameMatch,
+  scoreIntegrityWithLLM,
+};

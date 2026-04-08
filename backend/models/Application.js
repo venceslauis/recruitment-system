@@ -40,7 +40,13 @@ const ApplicationSchema = new mongoose.Schema({
   scoreDetails: {
     skillScore: { type: Number, default: 0 },
     integrityScore: { type: Number, default: 0 },
-    certificateBonus: { type: Number, default: 0 }
+    certificateBonus: { type: Number, default: 0 },
+    skillBreakdown: [{
+      skill: String,
+      weight: Number,
+      matched: Boolean,
+      similarity: Number
+    }]
   },
 
   // ZKP proof hash for the score verification

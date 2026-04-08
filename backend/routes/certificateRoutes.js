@@ -49,7 +49,7 @@ router.post("/upload", upload.single("certificate"), async (req, res) => {
       .digest("hex");
 
     /* Check for duplicate */
-    const existing = certificateChain.findCertificate(fileHash);
+    const existing = await certificateChain.findCertificate(fileHash);
     if (existing) {
       return res.status(409).json({
         error: "This certificate is already verified on the blockchain",
@@ -59,7 +59,7 @@ router.post("/upload", upload.single("certificate"), async (req, res) => {
     }
 
     /* Mine a new block with the certificate hash */
-    const block = certificateChain.addBlock({
+    const block = await certificateChain.addBlock({
       certificateHash: fileHash,
       candidateId,
       fileName: req.file.originalname
@@ -137,8 +137,8 @@ router.get("/verify/:certificateId", async (req, res) => {
       return res.status(404).json({ error: "Certificate not found" });
     }
 
-    const block = certificateChain.findCertificate(cert.fileHash);
-    const chainValid = certificateChain.isChainValid();
+    const block = await certificateChain.findCertificate(cert.fileHash);
+    const chainValid = await certificateChain.isChainValid();
 
     res.json({
       verified: !!block,
@@ -161,12 +161,12 @@ router.get("/verify/:certificateId", async (req, res) => {
    (transparency / debug)
 ========================= */
 
-router.get("/chain", (req, res) => {
+router.get("/chain", async (req, res) => {
 
   res.json({
-    length: certificateChain.getChain().length,
-    valid: certificateChain.isChainValid(),
-    blocks: certificateChain.getChain()
+    length: (await certificateChain.getChain()).length,
+    valid: await certificateChain.isChainValid(),
+    blocks: await certificateChain.getChain()
   });
 
 });
