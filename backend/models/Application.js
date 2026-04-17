@@ -27,7 +27,9 @@ const ApplicationSchema = new mongoose.Schema({
     name: String,
     title: String,
     score: Number,
-    verified: Boolean
+    verified: Boolean,
+    onChain: Boolean,
+    fileHash: String
   }],
 
   // Path to the uploaded resume file

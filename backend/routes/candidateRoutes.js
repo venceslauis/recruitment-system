@@ -7,7 +7,9 @@ const crypto = require("crypto");
 const Job = require("../models/Job");
 const Application = require("../models/Application");
 const Candidate = require("../models/Candidate");
+const Registry = require("../models/Registry");
 const { extractText, extractResumeFeatures, extractCertificateFeatures, fuzzyNameMatch, scoreIntegrityWithLLM } = require("../services/ocrService");
+const { certificateChain } = require("./../blockchain/blockchain.js");
 
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -64,6 +66,50 @@ router.post("/parse-certificate", upload.single("certificate"), async (req, res)
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Parsing failed" });
+  }
+});
+
+/* =========================
+   CHECK CERTIFICATE ON BLOCKCHAIN
+   Called when candidate uploads a cert — before applying.
+   Returns { onChain, isOfficial } for the UI badge.
+========================= */
+router.post("/check-certificate", upload.single("certificate"), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: "No file provided" });
+
+    // Hash the file
+    const fileBuffer = fs.readFileSync(req.file.path);
+    const fileHash = crypto.createHash("sha256").update(fileBuffer).digest("hex");
+
+    // Clean up temp file
+    try { fs.unlinkSync(req.file.path); } catch(e) {}
+
+    // Check on Sepolia blockchain
+    let onChain = false;
+    let blockchainError = null;
+    try {
+      const onChainData = await certificateChain.findCertificate(fileHash);
+      onChain = !!onChainData;
+    } catch (chainErr) {
+      blockchainError = chainErr.message;
+      console.error("Blockchain lookup failed:", chainErr.message);
+    }
+
+    // Check if it was officially issued (in Registry)
+    const isOfficial = await Registry.exists({ fileHash });
+
+    res.json({
+      fileHash,
+      onChain,
+      isOfficial: !!isOfficial,
+      // 'error' lets the frontend show "Check Failed" instead of false "Unverified"
+      status: blockchainError ? "error" : onChain ? "verified" : "unverified",
+      error: blockchainError
+    });
+  } catch (err) {
+    console.error("CERTIFICATE CHECK ERROR:", err.message);
+    res.status(500).json({ message: "Blockchain check failed", error: err.message, status: "error" });
   }
 });
 
@@ -196,31 +242,78 @@ router.post(
       });
 
       const certResults = await Promise.all(certSBERTPromises);
+      const certificatesData = [];
+      
+      // Setup tracking variables as per formula
+      let k = 0;                           // Accumulated score
+      let verified_count = 0;              // Number of accepted certificates
 
-      let k = 0;
-      const certificatesData = certResults.map(({ nameMatched, semSim, certName, certTitle }) => {
-        // Condition (1): Fuzzy name match >= 0.7
-        const cond1_nameMatch = nameMatched;
+      for (let i = 0; i < certResults.length; i++) {
+        const { nameMatched, semSim, certName, certTitle } = certResults[i];
+        const certFile = certificateFiles[i];
 
-        // Condition (2): Semantic similarity of cert title >= 0.5
-        const cond2_semMatch = semSim >= 0.5;
+        // 1. Calculate SHA-256 hash of the certificate file
+        const fileBuffer = fs.readFileSync(certFile.path);
+        const fileHash = crypto.createHash("sha256").update(fileBuffer).digest("hex");
 
-        // Condition (3): Blockchain ledger hash verification
-        // TODO: After blockchain deployment, call ledger API to compare cert hash
-        // For now: defaults to true (pass-through) until blockchain is live
-        const cond3_blockchain = true; // placeholder — will be replaced post-blockchain deployment
-
-        const verified = cond1_nameMatch && cond2_semMatch && cond3_blockchain;
-
-        console.log(`Cert "${certName}" → verified: ${verified} [name:${cond1_nameMatch}, sem:${semSim.toFixed(2)}, chain:${cond3_blockchain}]`);
-
-        let score = 0;
-        if (verified && k < totalCertWeight) {
-          k = Math.min(k + weightPerCert, totalCertWeight);
-          score = weightPerCert;
+        // 2. Blockchain Check: Is it already verified?
+        let onChainData = await certificateChain.findCertificate(fileHash);
+        
+        // 2.1 Registry Check: Is it an "Official" certificate?
+        const isOfficial = await Registry.exists({ fileHash });
+        
+        // 3. If not on chain, register it now
+        if (!onChainData) {
+          console.log(`🔗 New certificate detected! Registering on blockchain: ${certTitle}`);
+          try {
+            await certificateChain.addBlock({
+              certificateHash: fileHash,
+              candidateId: candidateId || "anonymous",
+              fileName: certFile.originalname
+            });
+            onChainData = { verified: true }; // Minimal mock for the loop
+          } catch (chainErr) {
+            console.error("Blockchain Registration Error:", chainErr.message);
+          }
+        } else {
+          console.log(`✅ Certificate match found on-chain: ${certTitle}`);
         }
-        return { name: certName, title: certTitle, verified, score };
-      });
+
+        // 4. Verification Logic
+        // Condition (1): Name Matching
+        const cond1_nameMatch = nameMatched;
+        // Condition (2): Semantic Similarity
+        const cond2_semMatch = semSim >= 0.5;
+        // Condition (3): Blockchain Verification
+        const cond3_blockchain = !!onChainData;
+
+        // Final Validation Check
+        const verified = cond1_nameMatch && cond2_semMatch && cond3_blockchain;
+        
+        let score = 0;
+        
+        if (verified) {
+          // If candidate uploads more than the required no. of verified proof then compute the score 
+          // for only the required proof and other certificates are considered but score will not generate.
+          if (verified_count < maxCerts) {
+            k = k + weightPerCert;
+            score = weightPerCert;
+            verified_count = verified_count + 1;
+          }
+        }
+
+        certificatesData.push({ 
+          name: certName, 
+          title: certTitle, 
+          verified, 
+          score,
+          fileHash,
+          onChain: cond3_blockchain,
+          isOfficial: !!isOfficial
+        });
+
+        console.log(`Cert "${certName}" [${certTitle}] → verified: ${verified} [name:${cond1_nameMatch}, sem:${semSim.toFixed(2)}, chain:${cond3_blockchain}] | score: ${score}`);
+      }
 
       const certificateBonus = Math.min(k, totalCertWeight);
 

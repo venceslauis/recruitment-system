@@ -9,6 +9,7 @@ import RecruiterHome from "./pages/RecruiterHome";
 import PostJob from "./pages/PostJob";
 import Applicants from "./pages/Applicants";
 import MyApplications from "./pages/MyApplications";
+import IssuerHome from "./pages/IssuerHome";
 
 function App(){
 
@@ -32,6 +33,7 @@ return(
 
 <Route path="/applicants/:jobId" element={<Applicants/>} />
 <Route path="/my-applications" element={<MyApplications/>}/>
+<Route path="/issuer" element={<IssuerHome />} />
 
 </Routes>
 

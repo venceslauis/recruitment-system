@@ -63,9 +63,10 @@ const Register: React.FC = () => {
            <form onSubmit={handleRequestOtp} className="relative z-10 flex flex-col space-y-4" autoComplete="off">
             <div>
               <label className="block text-sm font-medium text-gray-200 mb-1">Role</label>
-              <div className="flex gap-4">
-                <button type="button" onClick={() => setRole("candidate")} className={`flex-1 py-2 rounded-xl border ${role === 'candidate' ? 'bg-indigo-500 border-indigo-500 text-white' : 'bg-transparent border-white/20 text-gray-300'}`}>Candidate</button>
-                <button type="button" onClick={() => setRole("recruiter")} className={`flex-1 py-2 rounded-xl border ${role === 'recruiter' ? 'bg-indigo-500 border-indigo-500 text-white' : 'bg-transparent border-white/20 text-gray-300'}`}>Recruiter</button>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setRole("candidate")} className={`flex-1 py-2 rounded-xl border text-xs transition ${role === 'candidate' ? 'bg-indigo-500 border-indigo-500 text-white' : 'bg-transparent border-white/20 text-gray-300'}`}>Candidate</button>
+                <button type="button" onClick={() => setRole("recruiter")} className={`flex-1 py-2 rounded-xl border text-xs transition ${role === 'recruiter' ? 'bg-indigo-500 border-indigo-500 text-white' : 'bg-transparent border-white/20 text-gray-300'}`}>Recruiter</button>
+                <button type="button" onClick={() => setRole("issuer")} className={`flex-1 py-2 rounded-xl border text-xs transition ${role === 'issuer' ? 'bg-indigo-500 border-indigo-500 text-white' : 'bg-transparent border-white/20 text-gray-300'}`}>Issuer</button>
               </div>
             </div>
 

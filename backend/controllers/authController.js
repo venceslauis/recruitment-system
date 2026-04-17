@@ -42,7 +42,7 @@ const valid = await bcrypt.compare(password,user.password);
 
 if(!valid) return res.status(401).json("Invalid password");
 
-const token = jwt.sign({id:user._id,role:user.role},"secret");
+const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET || "secretkey");
 
 res.json({token,user});
 

@@ -24,6 +24,7 @@ const Login: React.FC = () => {
       }
       
       if (data.role === "candidate") navigate("/candidate/home");
+      else if (data.role === "issuer") navigate("/issuer");
       else navigate("/recruiter/home");
     } catch (error: any) {
       setErr(error.response?.data?.message || "Login failed");

@@ -61,7 +61,27 @@ const MyApplications: React.FC = () => {
                    <p className="text-teal-300 font-semibold mb-4">{app.jobId.company}</p>
                    <div className="flex items-center justify-between mt-auto pt-4 border-t border-white/10">
                      <span className="text-xs text-gray-400">Applied: {new Date(app.appliedAt).toLocaleDateString()}</span>
-                     <span className="bg-emerald-500/20 text-emerald-300 px-3 py-1 rounded-full text-xs font-semibold border border-emerald-500/20">Sent to Recruiter Dashboard</span>
+                                            <div className="mt-4 pt-4 border-t border-white/5">
+                          <p className="text-[10px] text-gray-400 uppercase tracking-widest font-bold mb-3">Secured Credentials</p>
+                          <div className="space-y-2">
+                             {app.certificates?.map((cert: any, i: number) => (
+                                <div key={i} className="flex items-center justify-between bg-black/20 p-2 rounded-xl border border-white/5">
+                                   <div className="flex items-center gap-2 overflow-hidden text-ellipsis">
+                                      <span className="text-sm truncate max-w-[150px]">{cert.title}</span>
+                                      {cert.isOfficial ? (
+                                         <span className="text-[9px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/20 font-bold">💎 Authentic</span>
+                                      ) : cert.onChain ? (
+                                         <span className="text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/20">On-Chain</span>
+                                      ) : null}
+                                   </div>
+                                   <div className={`text-[10px] font-bold ${cert.verified ? 'text-emerald-300' : 'text-gray-500'}`}>
+                                      {cert.verified ? '🛡️ Verified' : 'Pending'}
+                                   </div>
+                                </div>
+                             ))}
+                          </div>
+                       </div>
+                      <span className="bg-emerald-500/20 text-emerald-300 px-3 py-1 rounded-full text-xs font-semibold border border-emerald-500/20">Active</span>
                    </div>
                  </>
                ) : (

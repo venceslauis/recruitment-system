@@ -17,10 +17,11 @@ const CandidateHome: React.FC = () => {
   const [resume, setResume] = useState<File | null>(null);
   const [parsingResume, setParsingResume] = useState(false);
 
-  const [certificates, setCertificates] = useState<{file: File, name: string, title: string}[]>([]);
+  const [certificates, setCertificates] = useState<{file: File, name: string, title: string, onChain?: boolean | null, isOfficial?: boolean, checking?: boolean, status?: string, checkError?: string}[]>([]);
   const [parsingCert, setParsingCert] = useState(false);
 
   const [applyLoading, setApplyLoading] = useState(false);
+  const [applyStatus, setApplyStatus] = useState("");
   const [applyErr, setApplyErr] = useState("");
   const [applySuccess, setApplySuccess] = useState("");
 
@@ -79,23 +80,39 @@ const CandidateHome: React.FC = () => {
            return; 
         }
 
+        // Add entry immediately with checking=true
+        const idx = certificates.length;
+        setCertificates(prev => [...prev, {
+           file, name: "", title: "", onChain: null, isOfficial: false, checking: true
+        }]);
+
+        // Parse certificate text (OCR) & blockchain check — in parallel
         setParsingCert(true);
         const fd = new FormData();
         fd.append("certificate", file);
-        try {
-           const { data } = await API.post("/candidate/parse-certificate", fd, {
-              headers: { "Content-Type": "multipart/form-data" }
-           });
-           
-           setCertificates(prev => [...prev, {
-              file: file,
-              name: data.name || "",
-              title: data.title || ""
-           }]);
 
+        const fdCheck = new FormData();
+        fdCheck.append("certificate", file);
+
+        try {
+           const [parseRes, checkRes] = await Promise.allSettled([
+             API.post("/candidate/parse-certificate", fd, { headers: { "Content-Type": "multipart/form-data" } }),
+             API.post("/candidate/check-certificate", fdCheck, { headers: { "Content-Type": "multipart/form-data" } })
+           ]);
+
+           const parsed  = parseRes.status  === "fulfilled" ? parseRes.value.data  : {};
+           const checked = checkRes.status  === "fulfilled" ? checkRes.value.data  : { status: "error", error: "Network error" };
+
+           setCertificates(prev => prev.map((c, i) =>
+             i === idx
+               ? { ...c, name: parsed.name || "", title: parsed.title || "", onChain: checked.onChain ?? false, isOfficial: checked.isOfficial ?? false, checking: false, status: checked.status || "unverified", checkError: checked.error || null }
+               : c
+           ));
         } catch(err) {
-           console.error("Cert Parse Failed", err);
-           setCertificates(prev => [...prev, { file: file, name: "", title: "" }]);
+           console.error("Cert check failed", err);
+           setCertificates(prev => prev.map((c, i) =>
+             i === idx ? { ...c, onChain: false, checking: false, status: "error", checkError: "Network error" } : c
+           ));
         } finally {
            setParsingCert(false);
         }
@@ -113,6 +130,24 @@ const CandidateHome: React.FC = () => {
      setCertificates(certificates.filter((_, i) => i !== index));
   };
 
+  // Retry blockchain check for a single certificate
+  const retryCertificateCheck = async (idx: number) => {
+    const cert = certificates[idx];
+    if (!cert) return;
+    setCertificates(prev => prev.map((c, i) => i === idx ? { ...c, checking: true, status: undefined, checkError: undefined } : c));
+    const fdCheck = new FormData();
+    fdCheck.append("certificate", cert.file);
+    try {
+      const { data } = await API.post("/candidate/check-certificate", fdCheck, { headers: { "Content-Type": "multipart/form-data" } });
+      setCertificates(prev => prev.map((c, i) =>
+        i === idx ? { ...c, onChain: data.onChain, isOfficial: data.isOfficial, checking: false, status: data.status, checkError: data.error || null } : c
+      ));
+    } catch (err) {
+      setCertificates(prev => prev.map((c, i) =>
+        i === idx ? { ...c, checking: false, status: "error", checkError: "Network error" } : c
+      ));
+    }
+  };
 
   const handleApply = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -124,7 +159,7 @@ const CandidateHome: React.FC = () => {
        setApplyErr("Phone number must be exactly 10 digits.");
        return;
     }
-    setApplyLoading(true); setApplyErr(""); setApplySuccess("");
+    setApplyLoading(true); setApplyStatus("Uploading & Verifying..."); setApplyErr(""); setApplySuccess("");
     
     const formData = new FormData();
     formData.append("jobId", selectedJob._id);
@@ -139,7 +174,18 @@ const CandidateHome: React.FC = () => {
        formData.append("certificateTitles", cert.title);
     });
 
+    // Determine steps based on content
+    const needsBlockchain = certificates.length > 0;
+    
     try {
+      // Simulate granular progress if multiple steps involved
+      if (needsBlockchain) {
+        setTimeout(() => setApplyStatus("Registering on Blockchain..."), 1500);
+        setTimeout(() => setApplyStatus("Finalizing Application..."), 4500);
+      } else {
+        setTimeout(() => setApplyStatus("Finalizing Application..."), 800);
+      }
+
       const { data } = await API.post("/candidate/apply", formData, {
         headers: { "Content-Type": "multipart/form-data" }
       });
@@ -313,7 +359,7 @@ const CandidateHome: React.FC = () => {
 
                         <div className="space-y-4">
                            {certificates.map((cert, idx) => (
-                             <div key={idx} className="bg-black/20 p-4 rounded-xl border border-indigo-500/30 flex flex-col md:flex-row gap-4 items-center">
+                             <div key={idx} className="bg-black/20 p-4 rounded-xl border border-indigo-500/30 flex flex-col md:flex-row gap-4 items-start">
                                 <div className="flex-1">
                                     <label className="text-xs text-indigo-200 mb-1 block">Name on Certificate</label>
                                     <input value={cert.name} onChange={e => updateCertificateField(idx, 'name', e.target.value)} className="w-full bg-black/40 rounded-lg p-2 border border-indigo-500/20 text-sm" placeholder="Participant Name" />
@@ -322,7 +368,36 @@ const CandidateHome: React.FC = () => {
                                     <label className="text-xs text-indigo-200 mb-1 block">Certificate Title/Domain</label>
                                     <input value={cert.title} onChange={e => updateCertificateField(idx, 'title', e.target.value)} className="w-full bg-black/40 rounded-lg p-2 border border-indigo-500/20 text-sm" placeholder="Coursera Python, AWS Cloud Practitioner..." />
                                 </div>
-                                <button type="button" onClick={() => removeCertificate(idx)} className="text-red-400 hover:text-red-300 font-bold self-end md:self-center mt-2 md:mt-0 p-2">Remove</button>
+
+                                {/* ── Blockchain Status Badge ── */}
+                                <div className="flex flex-col items-center justify-center min-w-[90px] mt-2 md:mt-5">
+                                  {cert.checking ? (
+                                    <span className="flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-yellow-500/20 text-yellow-300 border border-yellow-500/30 animate-pulse">
+                                      <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                                      Checking
+                                    </span>
+                                  ) : cert.status === "error" ? (
+                                    <div className="flex flex-col items-center gap-1">
+                                      <span className="px-3 py-1 rounded-full text-xs font-bold bg-orange-500/20 text-orange-300 border border-orange-500/30">⚠️ Check Failed</span>
+                                      <button type="button" onClick={() => retryCertificateCheck(idx)} className="text-[10px] text-blue-300 underline hover:text-blue-200 mt-1">Retry</button>
+                                    </div>
+                                  ) : cert.onChain ? (
+                                    <div className="flex flex-col items-center gap-1">
+                                      <span className="flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                                        ✅ Verified
+                                      </span>
+                                      {cert.isOfficial && (
+                                        <span className="text-[10px] text-teal-300 font-semibold tracking-tight">⭐ Officially Issued</span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold bg-red-500/20 text-red-300 border border-red-500/30">
+                                      ❌ Unverified
+                                    </span>
+                                  )}
+                                </div>
+
+                                <button type="button" onClick={() => removeCertificate(idx)} className="text-red-400 hover:text-red-300 font-bold self-end md:self-center mt-2 md:mt-5 p-2">Remove</button>
                              </div>
                            ))}
                         </div>
@@ -347,7 +422,7 @@ const CandidateHome: React.FC = () => {
                         Cancel
                       </button>
                       <button type="submit" disabled={applyLoading || !resume} className="w-2/3 py-4 rounded-xl font-bold bg-gradient-to-r from-blue-500 to-indigo-600 hover:opacity-90 shadow-lg text-lg disabled:opacity-50">
-                        {applyLoading ? "Processing Registration..." : "Submit Application"}
+                        {applyLoading ? applyStatus : "Submit Application"}
                       </button>
                     </div>
                  </form>

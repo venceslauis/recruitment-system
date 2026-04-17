@@ -6,7 +6,7 @@ const multer = require("multer");
 
 const Certificate = require("../models/Certificate");
 const Candidate = require("../models/Candidate");
-const { certificateChain } = require("../blockchain/blockchain");
+const { certificateChain } = require("./../blockchain/blockchain.js");
 
 /* =========================
    MULTER CONFIG

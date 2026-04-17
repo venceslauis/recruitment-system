@@ -118,6 +118,50 @@ const Applicants: React.FC = () => {
                   <p className="text-xs text-gray-500 mt-3">
                     {app.scoreDetails.skillBreakdown.filter((s: any) => s.matched).length} / {app.scoreDetails.skillBreakdown.length} required skills matched
                   </p>
+
+                  {/* ── Certificate Verification Section ── */}
+                  <div className="mt-8 border-t border-white/5 pt-5">
+                    <p className="text-sm text-gray-400 font-semibold mb-4 uppercase tracking-widest">Verified Credentials & Proofs</p>
+                    <div className="space-y-4">
+                      {app.certificates?.length > 0 ? app.certificates.map((cert: any, i: number) => (
+                        <div key={i} className="flex flex-col md:flex-row md:items-center justify-between p-4 bg-white/5 border border-white/10 rounded-2xl gap-4">
+                          <div className="flex items-start gap-4">
+                             <div className="p-3 bg-indigo-500/20 rounded-xl text-indigo-300">
+                                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>
+                             </div>
+                             <div>
+                                <h4 className="font-bold text-white leading-tight">{cert.title || "Untitled Certificate"}</h4>
+                                <p className="text-xs text-gray-400 mt-0.5">Issued to: <span className="text-gray-200">{cert.name}</span></p>
+                                {cert.fileHash && (
+                                   <p className="text-[10px] font-mono text-gray-500 mt-2 bg-black/40 px-2 py-1 rounded inline-block">
+                                      Fingerprint: <span className="text-teal-500/80">{cert.fileHash.substring(0, 16)}...</span>
+                                   </p>
+                                )}
+                             </div>
+                          </div>
+                          <div className="flex items-center gap-3 self-end md:self-center">
+                            {cert.isOfficial ? (
+                              <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-500/20 text-blue-300 border border-blue-500/30 rounded-full text-xs font-bold shadow-sm shadow-blue-500/20">
+                                <span className="text-lg">💎</span>
+                                Authentic (Issued at Source)
+                              </div>
+                            ) : cert.onChain && cert.verified ? (
+                              <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full text-xs font-bold shadow-sm shadow-emerald-500/20">
+                                <span className="w-2 h-2 bg-emerald-400 rounded-full"></span>
+                                Verified On Blockchain
+                              </div>
+                            ) : (
+                              <div className="px-3 py-1.5 bg-gray-500/10 text-gray-400 border border-white/10 rounded-full text-xs">
+                                Verification Pending
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )) : (
+                        <p className="text-xs text-gray-500 italic">No certificates provided with this application.</p>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 

@@ -8,6 +8,7 @@ const authRoutes = require("./routes/authRoutes");
 const recruiterRoutes = require("./routes/recruiterRoutes");
 const candidateRoutes = require("./routes/candidateRoutes");
 const certificateRoutes = require("./routes/certificateRoutes");
+const issuerRoutes = require("./routes/issuerRoutes");
 
 const app = express();
 
@@ -22,6 +23,7 @@ app.use("/api/auth",authRoutes);
 app.use("/api/recruiter",recruiterRoutes);
 app.use("/api/candidate",candidateRoutes);
 app.use("/api/certificate",certificateRoutes);
+app.use("/api/issuer", issuerRoutes);
 
 app.get("/",(req,res)=>{
 res.send("API WORKING");
