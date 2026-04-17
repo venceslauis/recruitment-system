@@ -317,17 +317,17 @@ router.post(
 
       const certificateBonus = Math.min(k, totalCertWeight);
 
-      // FIX 4: Normalize to guarantee 0–100 range regardless of weight rounding errors  
-      const rawScore = skillScore + integrityScore + certificateBonus;
-      const totalDefinedWeight = (job.skillCriteria?.reduce((s, c) => s + c.weight, 0) || 0)
-                               + integrityWeight
-                               + totalCertWeight;
-      // If weights don't sum to 100, normalize proportionally; otherwise use raw
-      const matchScore = totalDefinedWeight > 0 && Math.abs(totalDefinedWeight - 100) > 1
-        ? parseFloat(((rawScore / totalDefinedWeight) * 100).toFixed(2))
-        : parseFloat(rawScore.toFixed(2));
+      // Final Score Calculation Model
+      // General formula: Score = ∑(Feature_i × Weight_i) + k
+      // (1) Semantic Skill Score = ∑(Skill_Sim_i * Weight_i) 
+      // (2) Integrity Score = (Integrity_Sim * Weight_i)
+      // (3) baseScore sums all the semantic feature values
+      const baseScore = skillScore + integrityScore;
+      
+      // (4) Add 'k' (certificate score) to the base score
+      const matchScore = parseFloat((baseScore + certificateBonus).toFixed(2));
 
-      console.log(`🏆 Final matchScore: ${matchScore} (raw: ${rawScore.toFixed(2)}, totalWeight: ${totalDefinedWeight})`);
+      console.log(`🏆 Final matchScore: ${matchScore} (baseScore: ${baseScore.toFixed(2)}, k/certificateScore: ${certificateBonus.toFixed(2)})`);
 
       // Generate ZKP proof hash
       const proofData = JSON.stringify({ email, jobId, matchScore, timestamp: Date.now() });
