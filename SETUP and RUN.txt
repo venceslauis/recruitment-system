@@ -3,22 +3,38 @@ SETUP and RUN
 
 1. Download MongoDBCompass and connect with db according to backend/config/db.js
 
-2. have 4 terminals open
+2. Have 5 terminals open
 
-3. terminal 1 : Connect with MongoDB. use mongod cmd
->> net start MongoDB
+3. Terminal 1: Connect with MongoDB
+>> mongod
 
-4. terminal 2 : direct to the ml-services and run the model with cmd
+4. Terminal 2: Start the ML API service
+>> cd ml-service
 >> pip install flask scikit-learn joblib numpy
 >> python ml_api.py
 
-5. terminal 3 : redirect to backend directory and download the npm dependencies with the following cmd
+5. Terminal 3: Start the SBERT matching service (REQUIRED for skill matching)
+>> cd sbert-service
+>> pip install flask flask-cors sentence-transformers
+>> python app.py
+(Should print: "5000 is the port. Model loaded successfully." or similar)
+
+6. Terminal 4: Start the backend server
+>> cd backend
 >> npm install express cors axios bcryptjs jsonwebtoken multer mongoose sequelize tesseract.js pdf-parse
 >> npm install nodemon --save-dev
 >> npx nodemon app.js
+(Should print: "Server running on port 5001")
 
-6. terminal 4 : redirect to frontend directory and download the npm dependencies with the following cmd
+7. Terminal 5: Start the frontend
+>> cd frontend
 >> npm install axios react-router-dom
 >> npm install -D tailwindcss postcss autoprefixer
 >> npx tailwindcss init -p
 >> npm start
+
+TROUBLESHOOTING:
+- If /api/candidate/apply returns 500 error: Check that SBERT service is running (terminal 3)
+- If skill matching not working: Verify sbert-service is running on http://localhost:5000
+- If resume parsing fails: Ensure Google Cloud credentials are properly set in .env file
+- If blockchain operations fail: Check SEPOLIA_RPC_URL and SEPOLIA_PRIVATE_KEY in .env

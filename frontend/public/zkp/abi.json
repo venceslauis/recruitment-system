@@ -1,0 +1,30 @@
+{
+  "inputs": [
+    {
+      "name": "candidate_cgpa",
+      "public": false,
+      "type": "field"
+    },
+    {
+      "name": "candidate_exp",
+      "public": false,
+      "type": "field"
+    },
+    {
+      "name": "min_cgpa",
+      "public": true,
+      "type": "field"
+    },
+    {
+      "name": "min_exp",
+      "public": true,
+      "type": "field"
+    }
+  ],
+  "output": {
+    "type": "tuple",
+    "components": {
+      "elements": []
+    }
+  }
+}

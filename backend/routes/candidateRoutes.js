@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require("multer");
 const axios = require("axios");
 const fs = require("fs");
+const path = require("path");
 const crypto = require("crypto");
 const Job = require("../models/Job");
 const Application = require("../models/Application");
@@ -113,6 +114,58 @@ router.post("/check-certificate", upload.single("certificate"), async (req, res)
   }
 });
 
+let zokratesProvider = null;
+let verificationKey = null;
+let zkpInitError = null;
+
+// Helper to eagerly load keys once
+const loadZkpEngine = async () => {
+  if (zokratesProvider && verificationKey) return true;
+  if (zkpInitError) return false; // Don't retry if already failed
+  
+  try {
+    console.log("🔄 Initializing Zero-Knowledge Proof engine...");
+    let zkLib;
+    try {
+      zkLib = require("zokrates-js");
+    } catch (importErr) {
+      throw new Error(`Failed to import zokrates-js: ${importErr.message}`);
+    }
+    
+    if (!zkLib.initialize) {
+      throw new Error("zokrates-js.initialize is not available");
+    }
+    
+    const providerResult = await zkLib.initialize();
+    if (!providerResult) {
+      throw new Error("initialize() returned null/undefined");
+    }
+    
+    zokratesProvider = providerResult;
+    console.log("✅ ZoKrates provider initialized.");
+    
+    // Load verification key
+    const vkPath = path.join(__dirname, "../zkp/verification.key");
+    console.log(`📂 Looking for verification key at: ${vkPath}`);
+    
+    if (!fs.existsSync(vkPath)) {
+      throw new Error(`Verification key not found at ${vkPath}`);
+    }
+    
+    const vkContent = fs.readFileSync(vkPath, "utf-8");
+    verificationKey = JSON.parse(vkContent);
+    console.log("✅ ZKP Verification Key loaded successfully.");
+    return true;
+    
+  } catch (err) {
+    zkpInitError = err.message;
+    console.error("❌ Backend ZKP Initialization Error:", err.message);
+    console.error("Stack trace:", err.stack);
+    return false;
+  }
+};
+
+// ... inside /apply route ...
 router.post(
   "/apply",
   upload.fields([{ name: "resume", maxCount: 1 }, { name: "certificate", maxCount: 10 }]),
@@ -138,18 +191,72 @@ router.post(
       const job = await Job.findById(jobId);
       if (!job) return res.status(404).json({ message: "Job not found" });
 
-      // ELIGIBILITY CHECK (ZKP Validation mock)
+      // ==========================================
+      // ELIGIBILITY CHECK (Backend ZKP Option A)
+      // ==========================================
       if (job.eligibility) {
         let isEligible = true;
-        if (job.eligibility.experience && Number(experience) < job.eligibility.experience) isEligible = false;
-        if (job.eligibility.cgpa && Number(cgpa) < job.eligibility.cgpa) isEligible = false;
+
         if (job.eligibility.age && Number(age) > job.eligibility.age) isEligible = false;
         if (job.eligibility.degree && degree?.toLowerCase() !== job.eligibility.degree.toLowerCase()) isEligible = false;
         if (job.eligibility.location && location?.toLowerCase() !== job.eligibility.location.toLowerCase()) isEligible = false;
         if (job.eligibility.gender && job.eligibility.gender !== 'Any' && gender?.toLowerCase() !== job.eligibility.gender.toLowerCase()) isEligible = false;
         
+        // Zero-Knowledge Proof Check (CGPA & Experience) natively generated via backend
+        const requiresZkp = job.eligibility.cgpa || job.eligibility.experience;
+
+        if (requiresZkp) {
+          const isEngineReady = await loadZkpEngine();
+          if (!isEngineReady) {
+            return res.status(500).json({ message: "Backend ZKP verification engine offline." });
+          }
+
+          try {
+            console.log("🔍 Backend generating Cryptographic Zero-Knowledge Proof...");
+            // Load program, abi, pk
+            const program = fs.readFileSync(path.join(__dirname, "../zkp/out"));
+            const abi = JSON.parse(fs.readFileSync(path.join(__dirname, "../zkp/abi.json"), "utf-8"));
+            const provingKey = fs.readFileSync(path.join(__dirname, "../zkp/proving.key"));
+
+            const candCgpa = parseFloat(cgpa) || 0;
+            const candExp = parseFloat(experience) || 0;
+            const minCgpa = parseFloat(job.eligibility.cgpa?.toString() || "0");
+            const minExp = parseFloat(job.eligibility.experience?.toString() || "0");
+
+            const c_cgpa_str = Math.floor(candCgpa * 10).toString();
+            const m_cgpa_str = Math.floor(minCgpa * 10).toString();
+            const c_exp_str = Math.floor(candExp).toString();
+            const m_exp_str = Math.floor(minExp).toString();
+
+            const { witness } = zokratesProvider.computeWitness(
+              { program, abi },
+              [c_cgpa_str, c_exp_str, m_cgpa_str, m_exp_str]
+            );
+
+            const zkpProof = zokratesProvider.generateProof(program, witness, provingKey);
+
+            // Verify mathematically natively on backend
+            let verifyKey = null;
+            try {
+               verifyKey = JSON.parse(fs.readFileSync(path.join(__dirname, "../zkp/verification.key"), "utf-8"));
+            } catch(e) {
+               console.error("Failed to load verification key runtime:", e.message);
+               return res.status(500).json({ message: "Verification System Offline." });
+            }
+
+            const isProofValid = zokratesProvider.verify(verifyKey, zkpProof);
+            if (!isProofValid) {
+              return res.status(400).json({ message: "Generated Zero-Knowledge Proof verification FAILED." });
+            }
+            console.log("✅ ZKP Generated and Verification PASSED. Proceeding securely.");
+          } catch (zkpErr) {
+            console.error("ZKP Backend Generation Error:", zkpErr);
+            return res.status(400).json({ message: "Server was unable to mathematically prove your credentials. You do not meet the minimum job requirements.", error: zkpErr.message });
+          }
+        }
+
         if (!isEligible) {
-          return res.status(400).json({ message: "You do not meet the eligibility criteria for this job." });
+          return res.status(400).json({ message: "You do not meet the standard eligibility criteria for this job." });
         }
       }
 
@@ -176,10 +283,23 @@ router.post(
       const weightPerCert   = maxCerts > 0 ? (totalCertWeight / maxCerts) : 0;
       const certificateFiles = req.files['certificate'] || [];
 
-      const sbertCall = (text1, text2) =>
-        axios.post("http://127.0.0.1:5000/match", { resumeText: text1, jobDescription: text2 })
-             .then(r => Math.max(0, r.data.score))
-             .catch(e => { console.error("SBERT Error:", e.message); return 0; });
+      const sbertCall = async (text1, text2) => {
+        try {
+          const response = await axios.post("http://127.0.0.1:5000/match", 
+            { resumeText: text1, jobDescription: text2 },
+            { timeout: 30000 }
+          );
+          return Math.max(0, response.data.score || 0);
+        } catch (e) {
+          const errorMsg = e.response?.data?.message || e.message || "Unknown error";
+          if (e.code === 'ECONNREFUSED') {
+            console.error("❌ SBERT Service unavailable at http://127.0.0.1:5000. Is the service running?");
+            throw new Error("SBERT service not running. Please start the sbert-service before applying.");
+          }
+          console.error("⚠️  SBERT Error:", errorMsg);
+          throw new Error(`Skill matching service error: ${errorMsg}`);
+        }
+      };
 
       // ── 1. Proportional Skill Scoring (per-skill SBERT, all in parallel) ──────
       // FIX 2: Proportional formula — score = (sim / 100) * weight per skill
@@ -257,10 +377,22 @@ router.post(
         const fileHash = crypto.createHash("sha256").update(fileBuffer).digest("hex");
 
         // 2. Blockchain Check: Is it already verified?
-        let onChainData = await certificateChain.findCertificate(fileHash);
+        let onChainData = null;
+        let blockchainError = null;
+        try {
+          onChainData = await certificateChain.findCertificate(fileHash);
+        } catch (chainErr) {
+          blockchainError = chainErr.message;
+          console.error("⚠️  Blockchain lookup error:", blockchainError);
+        }
         
         // 2.1 Registry Check: Is it an "Official" certificate?
-        const isOfficial = await Registry.exists({ fileHash });
+        let isOfficial = false;
+        try {
+          isOfficial = await Registry.exists({ fileHash });
+        } catch (regErr) {
+          console.error("⚠️  Registry lookup error:", regErr.message);
+        }
         
         // 3. If not on chain, register it now
         if (!onChainData) {
@@ -273,7 +405,9 @@ router.post(
             });
             onChainData = { verified: true }; // Minimal mock for the loop
           } catch (chainErr) {
-            console.error("Blockchain Registration Error:", chainErr.message);
+            console.error("⚠️  Blockchain registration error:", chainErr.message);
+            blockchainError = chainErr.message;
+            // Continue anyway - certificate can still be verified
           }
         } else {
           console.log(`✅ Certificate match found on-chain: ${certTitle}`);
@@ -357,8 +491,17 @@ router.post(
       });
 
     } catch (err) {
-      console.error("APPLICATION ERROR:", err);
-      res.status(500).json({ message: "Application failed" });
+      console.error("APPLICATION ERROR:", err.message || err);
+      console.error("Stack:", err.stack);
+      
+      // Return detailed error message for debugging
+      const errorMsg = err.message || "Unknown error";
+      const statusCode = err.statusCode || 500;
+      
+      res.status(statusCode).json({ 
+        message: "Application failed: " + errorMsg,
+        error: process.env.NODE_ENV === 'development' ? err.message : undefined
+      });
     }
   }
 );

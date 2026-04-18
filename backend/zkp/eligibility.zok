@@ -1,0 +1,16 @@
+// eligibility.zok
+
+// private field candidate_cgpa : The candidate's actual CGPA (* 10)
+// private field candidate_exp  : The candidate's actual Experience 
+// public field min_cgpa        : The recruiter's minimum CGPA (* 10)
+// public field min_exp         : The recruiter's minimum Experience
+
+def main(private field candidate_cgpa, private field candidate_exp, field min_cgpa, field min_exp) {
+    // Check 1: Candidate CGPA must be >= Minimum CGPA
+    assert(candidate_cgpa >= min_cgpa);
+    
+    // Check 2: Candidate Exp must be >= Minimum Exp
+    assert(candidate_exp >= min_exp);
+    
+    return;
+}
